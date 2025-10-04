@@ -32,7 +32,7 @@ macOS와 Windows만 사용한다면 다음과 같이 “무설치” 구성이 �
 ## 실행 방법
 
 ```bash
-python init.py [옵션]
+python main.py [옵션]
 ```
 
 사용 가능한 주요 옵션:
