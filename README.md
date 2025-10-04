@@ -1,8 +1,6 @@
 # ASCII Chess CLI
 
-HNU CE vibe coding project - CLI ASCII Chess
-
-윤여명, 정재석, 지민우
+HNU CE vibe coding project - CLI ASCII Chess / 윤여명, 정재석, 지민우
 
 ASCII 기반 터미널 체스 게임으로, 사용자가 입력한 레이팅으로 설정된 Stockfish AI와 SAN(Smith Algebraic Notation) 형식으로 대국할 수 있도록 설계된 파이썬 프로젝트입니다.
 
