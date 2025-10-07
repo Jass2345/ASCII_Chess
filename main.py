@@ -38,6 +38,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Force ASCII board rendering instead of Unicode chess glyphs.",
     )
     parser.add_argument(
+        "--cli",
+        action="store_true",
+        help="Run the classic CLI experience instead of the GUI.",
+    )
+    parser.add_argument(
         "--no-auto-install",
         action="store_true",
         help="Skip automatic installation attempt for python-chess.",
@@ -81,15 +86,27 @@ def main(argv: list[str] | None = None) -> int:
         default_think_time=args.think_time,
     )
 
-    renderer = AsciiRenderer(use_unicode=not args.ascii_only)
+    if args.cli:
+        renderer = AsciiRenderer(use_unicode=not args.ascii_only)
+        try:
+            controller = GameController(renderer=renderer, engine_config=engine_config)
+        except RuntimeError as exc:
+            print(f"Failed to initialise game: {exc}", file=sys.stderr)
+            return 1
+        controller.run()
+        return 0
 
     try:
-        controller = GameController(renderer=renderer, engine_config=engine_config)
-    except RuntimeError as exc:
-        print(f"Failed to initialise game: {exc}", file=sys.stderr)
+        import tkinter as tk
+    except Exception as exc:  # pragma: no cover - Tk may be missing
+        print(f"Failed to load Tkinter: {exc}", file=sys.stderr)
         return 1
 
-    controller.run()
+    from ascii_chess.gui import ChessGUI
+
+    root = tk.Tk()
+    ChessGUI(root, engine_config=engine_config, use_unicode=not args.ascii_only)
+    root.mainloop()
     return 0
 
 

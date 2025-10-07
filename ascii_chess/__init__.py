@@ -8,6 +8,7 @@ __all__ = [
     "GameController",
     "AsciiRenderer",
     "StockfishAI",
+    "ChessGUI",
 ]
 
 
@@ -24,4 +25,8 @@ def __getattr__(name: str) -> Any:
         from .ai import StockfishAI as _StockfishAI
 
         return _StockfishAI
+    if name == "ChessGUI":
+        from .gui import ChessGUI as _ChessGUI
+
+        return _ChessGUI
     raise AttributeError(name)

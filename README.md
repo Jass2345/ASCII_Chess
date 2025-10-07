@@ -38,19 +38,21 @@ python main.py [옵션]
 사용 가능한 주요 옵션:
 - `--engine-path /path/to/stockfish` : Stockfish 실행 파일 경로
 - `--think-time 1.0` : AI 한 수당 사고 시간(초)
-- `--ascii-only` : 유니코드 대신 ASCII 기물 사용
+- `--ascii-only` : 유니코드 대신 ASCII 기물 사용 (GUI/CLI 공통)
+- `--cli` : 기존 CLI 모드로 실행 (기본값은 GUI)
 - `--min-rating`, `--max-rating` : 입력 가능한 레이팅 범위 조정
 - `--no-auto-install` : `python-chess` 자동 설치 시도를 건너뜀
 
 프로그램 실행 후:
 1. 의존성 점검 단계에서 `python-chess` 미설치 시 자동 설치를 시도하고, Stockfish 경로가 없으면 안내 메시지를 표시합니다. `engines/` 폴더에 플랫폼별 바이너리를 넣어두면 자동으로 감지합니다.
-2. 시작 화면에서 AI 레이팅을 입력 (미입력 시 기본 1500)
-3. 게임 화면에서 SAN 형식으로 수를 입력 (`Nf3`, `O-O`, `cxd4`, `resign`, `quit` 등)
-4. 게임 종료 시 결과가 표시되면 재도전 여부를 선택
+2. GUI 모드에서는 실행 직후 AI 레이팅을 입력하고, 좌측 보드와 우측 기보·입력창에서 게임을 진행합니다.
+3. CLI 모드(`python main.py --cli`)에서는 기존과 동일하게 SAN 형식으로 수를 입력합니다 (`Nf3`, `O-O`, `cxd4`, `resign`, `quit` 등).
+4. 게임 종료 시 결과가 표시되면 재도전 여부를 선택하거나 종료합니다.
 
 ## 개발 메모
-- `ascii_chess/renderer.py` : 출력 레이아웃 & 보드 렌더링 로직
-- `ascii_chess/game.py` : 게임 루프, 입력 처리, 결과 안내
+- `ascii_chess/renderer.py` : CLI 출력 레이아웃 & 보드 렌더링 로직
+- `ascii_chess/gui.py` : Tkinter 기반 GUI 화면 구성 및 이벤트 루프
+- `ascii_chess/game.py` : CLI 게임 루프, 입력 처리, 결과 안내
 - `ascii_chess/ai.py` : Stockfish 래퍼 및 레이팅 설정
 - `ascii_chess/taunts.py` : 간단한 도발 멘트 선택기
 - `ascii_chess/deps.py` : 의존성 자동 확인 및 `python-chess` 설치 시도
