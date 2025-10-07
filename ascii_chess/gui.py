@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import messagebox, simpledialog
+from tkinter import messagebox
 from typing import List, Optional
 
 try:
@@ -11,10 +11,9 @@ except ImportError:  # pragma: no cover - handled by dependency check in main
 
 from .ai import EngineConfig, StockfishAI
 from .renderer import ASCII_PIECES, LIGHT_SQUARE, DARK_SQUARE, UNICODE_PIECES
-from .taunts import TauntManager
 
 
-BOARD_FONT = ("Menlo", 18)
+BOARD_FONT = ("Menlo", 32)
 MOVE_FONT = ("Menlo", 14)
 STATUS_FONT = ("Menlo", 12)
 PROMPT_FONT = ("Menlo", 12)
@@ -26,32 +25,34 @@ class ChessGUI:
             raise RuntimeError("python-chess is required to run the GUI.")
 
         self.root = root
-        self.root.title("ASCII Chess vs Stockfish")
+        self.root.title("ASCII Chess")
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.engine_config = engine_config
         self.ai = StockfishAI(config=self.engine_config)
-        self.taunts = TauntManager()
         self.use_unicode = use_unicode
 
         self.board = chess.Board()
         self.move_history: List[str] = []
         self._awaiting_ai = False
         self._resigned = False
-
+        self._forfeited = False
+        self._focus_binding: Optional[str] = None
         self._build_widgets()
-        self._prompt_rating()
-        self._render()
+        self._configure_geometry()
+        self._bring_to_front()
+        self._show_intro_screen()
 
     def _build_widgets(self) -> None:
         main_frame = tk.Frame(self.root, padx=12, pady=12)
         main_frame.pack(fill=tk.BOTH, expand=True)
+        self.main_frame = main_frame
 
         # Board display
         self.board_text = tk.Text(
             main_frame,
-            width=30,
-            height=20,
+            width=2,
+            height=2,
             font=BOARD_FONT,
             bg="#111",
             fg="#eee",
@@ -62,13 +63,14 @@ class ChessGUI:
         # Moves display
         moves_frame = tk.Frame(main_frame)
         moves_frame.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        self.moves_frame = moves_frame
 
         moves_label = tk.Label(moves_frame, text="Moves", font=STATUS_FONT)
         moves_label.pack(anchor="w")
 
         self.moves_text = tk.Text(
             moves_frame,
-            width=24,
+            width=18,
             height=18,
             font=MOVE_FONT,
             state=tk.DISABLED,
@@ -79,11 +81,12 @@ class ChessGUI:
         input_frame = tk.Frame(main_frame)
         input_frame.grid(row=1, column=1, sticky="nsew", padx=(12, 0), pady=(12, 0))
 
-        self.status_label = tk.Label(input_frame, text="Welcome to ASCII Chess!", font=STATUS_FONT)
+        self.status_label = tk.Label(input_frame, text="Welcome, Player!", font=STATUS_FONT)
         self.status_label.pack(anchor="w")
 
-        self.taunt_label = tk.Label(input_frame, text="", font=STATUS_FONT, fg="#888")
-        self.taunt_label.pack(anchor="w", pady=(4, 8))
+        self.enemy_label = tk.Label(input_frame, text="Enemy: Ready", font=STATUS_FONT, fg="#888")
+        self.enemy_label.pack(anchor="w", pady=(4, 8))
+        self.input_frame = input_frame
 
         entry_row = tk.Frame(input_frame)
         entry_row.pack(fill=tk.X)
@@ -92,12 +95,12 @@ class ChessGUI:
         self.move_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.move_entry.bind("<Return>", self._on_submit)
 
-        submit_button = tk.Button(entry_row, text="Submit", command=self._on_submit)
-        submit_button.pack(side=tk.LEFT, padx=(6, 0))
+        self.submit_button = tk.Button(entry_row, text="Submit", command=self._on_submit)
+        self.submit_button.pack(side=tk.LEFT, padx=(6, 0))
 
         help_label = tk.Label(
             input_frame,
-            text="Commands: resign, help, quit",
+            text="Commands: ff, help, quit",
             font=STATUS_FONT,
             fg="#777",
         )
@@ -109,20 +112,108 @@ class ChessGUI:
         main_frame.rowconfigure(0, weight=4)
         main_frame.rowconfigure(1, weight=1)
 
-    def _prompt_rating(self) -> None:
-        rating = simpledialog.askinteger(
-            "Set AI Elo",
-            "Enter AI Elo (1350-2850, default 1500):",
-            parent=self.root,
-            minvalue=self.engine_config.min_rating,
-            maxvalue=self.engine_config.max_rating,
+    def _show_intro_screen(self) -> None:
+        self.main_frame.pack_forget()
+
+        self.intro_frame = tk.Frame(self.root, bg="#111", padx=40, pady=40)
+        self.intro_frame.pack(fill=tk.BOTH, expand=True)
+
+        pawn_art = (
+            """⠀⠀⠀⡀⠀⠄⠀⠀⢀⠀⠀⡀⠀⠠⠀⠀⠀⡀⠀⠄⠀⠀⠄⠀⠀⢀⠀⠠⠀⠀
+⠁⠀⠄⠀⠀⠄⠈⠀⡀⠀⠄⠀⠠⠀⠀⠁⡀⠀⠀⠄⠈⠀⡀⠈⢀⠀⠀⠠⠀⠁
+⠐⠀⠀⠐⠀⠀⠐⠀⠀⠄⠀⢐⡰⡜⡝⡵⣲⢔⠀⠀⠐⠀⠀⠄⠀⠀⠂⠀⠐⠀
+⠄⠀⠁⡀⠈⠀⠠⠈⠀⠀⠐⣸⢜⢜⢜⢎⡗⡯⣇⠁⢀⠀⠁⡀⠐⠀⡀⠁⠀⠄
+⠀⠀⠂⠀⠀⠂⠀⠄⠀⠁⢀⢺⡪⡮⣪⣳⢽⣝⡇⠄⠀⠠⠀⠀⠠⠀⠀⠠⠀⠠
+⠀⠂⠀⠈⢀⠀⠁⢀⠀⠁⠀⠀⡽⡽⣳⡽⣗⣏⠀⠀⠐⠀⠀⠂⠀⠀⠂⢀⠀⠂
+⠄⠀⠁⠠⠀⠀⠄⠀⠀⠄⠁⠙⠊⡯⣾⣺⡵⠋⠃⠁⢀⠈⠀⠠⠈⠀⡀⠀⠀⠄
+⠀⠐⠀⢀⠀⠂⠀⠐⠀⠀⠄⠀⠀⣟⢼⣞⣿⠀⠀⠂⠀⠀⠄⠀⠐⠀⠀⠐⠀⠀
+⠁⠀⠄⠀⢀⠀⠈⢀⠀⠁⠀⠈⢐⡽⣜⣞⣿⡀⠠⠀⠈⢀⠀⠈⢀⠀⠁⢀⠈⠀
+⠐⠀⠀⠐⠀⠀⠐⠀⠀⠄⠈⢀⢮⢯⢞⡾⡽⣧⡀⠀⠂⠀⠀⠐⠀⠀⠄⠀⠀⠂
+⡀⠀⠁⡀⠀⠁⡀⠐⠀⢀⠐⣨⢿⢽⡽⣾⣻⢷⡅⢀⠠⠀⠁⡀⠈⠀⡀⠈⢀⠀
+⠀⠀⠂⠀⠀⠂⠀⠠⠀⣖⡯⣺⢝⣗⢯⢗⡽⣳⢯⣗⡷⠀⠀⠀⠠⠀⠀⠠⠀⠀
+⠈⠀⡀⠈⠀⡀⠂⠀⠀⠺⠽⠽⣝⣞⡽⡽⣝⢷⠯⠷⠛⠀⠈⠀⡀⠀⠂⠀⠐⠀
+⠄⠀⠀⠄⠀⠀⠄⠈⠀⡀⠀⠄⠀⠀⢀⠀⠀⢀⠀⠠⠀⠈⠀⡀⠀⠠⠀⠁⠀⠄
+⢀⠀⠁⠀⠐⠀⠀⠐⠀⠀⠠⠀⠐⠀⠀⠀⠂⠀⠀⠄⠀⠂⠁⠀⠐⠀⠀⠐⠀⠀"""
         )
-        if rating is None:
-            rating = 1500
-        else:
-            rating = max(self.engine_config.min_rating, min(rating, self.engine_config.max_rating))
+
+        art_label = tk.Label(
+            self.intro_frame,
+            text=pawn_art,
+            font=("Courier", 18),
+            bg="#111",
+            fg="#eee",
+            justify=tk.CENTER,
+        )
+        art_label.pack(pady=(0, 16))
+
+        title_label = tk.Label(
+            self.intro_frame,
+            text="< ASCII Chess >",
+            font=("Menlo", 26, "bold"),
+            bg="#111",
+            fg="#eee",
+        )
+        title_label.pack(pady=(0, 12))
+
+        self.blink_label = tk.Label(
+            self.intro_frame,
+            text="< Press Enter to start >",
+            font=("Menlo", 16),
+            bg="#111",
+            fg="#eee",
+        )
+        self.blink_label.pack(pady=(0, 8))
+        self._blink_state = True
+        self._blink()
+
+        self.root.bind("<Return>", self._start_game_from_intro)
+
+    def _blink(self) -> None:
+        if not hasattr(self, "blink_label"):
+            return
+        self._blink_state = not self._blink_state
+        color = "#eee" if self._blink_state else "#555"
+        self.blink_label.config(fg=color)
+        self.root.after(500, self._blink)
+
+    def _start_game_from_intro(self, event: tk.Event | None = None) -> None:
+        if not hasattr(self, "intro_frame"):
+            return
+        self.root.unbind("<Return>")
+        self.intro_frame.destroy()
+        del self.intro_frame
+        del self.blink_label
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        self.status_label.config(text="Enter Enemy Elo (1350-2850, default 1500):")
+        self.move_entry.delete(0, tk.END)
+        self.move_entry.insert(0, "1500")
+        self.move_entry.selection_range(0, tk.END)
+        self.move_entry.focus_set()
+        self.move_entry.bind("<Return>", self._on_submit_with_rating)
+        self.submit_button.configure(command=self._on_submit_with_rating)
+
+    def _on_submit_with_rating(self, event: tk.Event | None = None) -> None:
+        text = self.move_entry.get().strip()
+        if not text:
+            self.status_label.config(text="Please enter a rating between 1350 and 2850.")
+            return
+        try:
+            rating = int(text)
+        except ValueError:
+            self.status_label.config(text="Rating must be a number (1350-2850).")
+            self.move_entry.selection_range(0, tk.END)
+            return
+        rating = max(self.engine_config.min_rating, min(rating, self.engine_config.max_rating))
+        self.move_entry.delete(0, tk.END)
         self.ai.set_rating(rating)
-        self.status_label.config(text=f"Playing vs Stockfish ({rating} Elo). Your move!")
+        self.status_label.config(text=f"Enemy rating: {rating} Elo. Player to move.")
+        self.enemy_label.config(text="Enemy: Ready")
+        self._resigned = False
+        self._forfeited = False
+        self._awaiting_ai = False
+        self.move_entry.bind("<Return>", self._on_submit)
+        self.submit_button.configure(command=self._on_submit)
+        self._render()
 
     def _on_submit(self, event: Optional[tk.Event] = None) -> None:
         if self._awaiting_ai:
@@ -135,21 +226,29 @@ class ChessGUI:
 
     def _handle_player_input(self, user_input: str) -> None:
         lowered = user_input.lower()
+        if lowered in {"/win", "/lose", "/draw"}:
+            outcome = lowered[1:]
+            self._handle_forced_outcome(outcome)
+            return
         if lowered == "help":
             messagebox.showinfo(
                 "Help",
                 "Enter chess moves in SAN (e.g. Nf3, O-O, cxd4).\n"
-                "Commands:\n  resign - concede the game\n  quit   - exit the application",
+                "Commands:\n  ff     - forfeit the game\n  quit   - exit the application",
                 parent=self.root,
             )
             return
         if lowered == "quit":
-            self.root.quit()
+            self.root.destroy()
             return
-        if lowered == "resign":
+        if lowered == "ff":
             self._resigned = True
-            self.status_label.config(text="You resigned.")
-            self._finish_game("You resigned. Stockfish wins.")
+            self._forfeited = True
+            self._awaiting_ai = False
+            self.status_label.config(text="Player forfeited. Enemy wins.")
+            self.enemy_label.config(text="Enemy: Victory")
+            messagebox.showinfo("Game over", "Player forfeited. Enemy wins.", parent=self.root)
+            self._ask_play_again()
             return
 
         try:
@@ -161,7 +260,8 @@ class ChessGUI:
 
         self.board.push(move)
         self.move_history.append(san)
-        self.status_label.config(text="Stockfish is thinking...")
+        self.status_label.config(text="Enemy is thinking...")
+        self.enemy_label.config(text="Enemy: Calculating...")
         self._render()
 
         if self.board.is_game_over(claim_draw=True):
@@ -182,14 +282,28 @@ class ChessGUI:
         san = self.board.san(ai_move)
         self.board.push(ai_move)
         self.move_history.append(san)
-        evaluation = self._evaluate(self.board)
-        self.taunt_label.config(text=self.taunts.choose(evaluation))
-        self.status_label.config(text="Your move.")
+        self.enemy_label.config(text=f"Enemy: {san}")
+        self.status_label.config(text="Player to move.")
         self._awaiting_ai = False
         self._render()
 
         if self.board.is_game_over(claim_draw=True):
             self._announce_result()
+
+    def _handle_forced_outcome(self, outcome: str) -> None:
+        mapping = {
+            "win": ("플레이어가 승리했습니다.", "Enemy: Defeated"),
+            "lose": ("Enemy 승리.", "Enemy: Victory"),
+            "draw": ("무승부입니다.", "Enemy: Draw"),
+        }
+        message, enemy_text = mapping.get(outcome, ("무승부입니다.", "Enemy: Draw"))
+        self._awaiting_ai = False
+        self._resigned = False
+        self._forfeited = False
+        self.status_label.config(text=message)
+        self.enemy_label.config(text=enemy_text)
+        messagebox.showinfo("Game over", message, parent=self.root)
+        self._ask_play_again()
 
     def _announce_result(self) -> None:
         outcome = self.board.outcome(claim_draw=True)
@@ -198,14 +312,20 @@ class ChessGUI:
         elif outcome.winner is None:
             result_text = "Draw!"
         elif outcome.winner == chess.WHITE:
-            result_text = "White wins!"
+            result_text = "Player wins!"
         else:
-            result_text = "Black wins!"
-
-        if self._resigned and outcome is None:
-            result_text = "You resigned. Stockfish wins."
+            result_text = "Enemy wins!"
 
         messagebox.showinfo("Game over", result_text, parent=self.root)
+        if outcome and outcome.winner is not None:
+            if outcome.winner == chess.WHITE:
+                self.enemy_label.config(text="Enemy: Defeated")
+            else:
+                self.enemy_label.config(text="Enemy: Victory")
+        elif outcome and outcome.winner is None:
+            self.enemy_label.config(text="Enemy: Draw")
+        else:
+            self.enemy_label.config(text="Enemy: Idle")
         self._ask_play_again()
 
     def _ask_play_again(self) -> None:
@@ -218,19 +338,25 @@ class ChessGUI:
     def _reset_game(self) -> None:
         self.board = chess.Board()
         self.move_history.clear()
-        self.taunt_label.config(text=self.taunts.choose(0))
-        self.status_label.config(text="New game! Your move.")
+        self.enemy_label.config(text="Enemy: Ready")
+        self.status_label.config(text="New game! Player to move.")
         self._resigned = False
+        self._forfeited = False
+        self._awaiting_ai = False
         self._render()
 
     def _render(self) -> None:
         board_text = self._board_to_text(self.board)
         moves_text = self._moves_to_text(self.move_history)
 
+        lines = board_text.splitlines() or [""]
+        max_cols = max(len(line) for line in lines)
+
         self.board_text.config(state=tk.NORMAL)
         self.board_text.delete("1.0", tk.END)
         self.board_text.insert(tk.END, board_text)
         self.board_text.config(state=tk.DISABLED)
+        self.board_text.configure(width=max_cols, height=len(lines))
 
         self.moves_text.config(state=tk.NORMAL)
         self.moves_text.delete("1.0", tk.END)
@@ -246,11 +372,13 @@ class ChessGUI:
                 square = chess.square(file, rank)
                 piece = board.piece_at(square)
                 if piece is None:
-                    row.append(LIGHT_SQUARE if (rank + file) % 2 else DARK_SQUARE)
+                    row.append(LIGHT_SQUARE)
                 else:
-                    row.append(self._piece_symbol(piece.symbol()))
+                    symbol = self._piece_symbol(piece.symbol())
+                    row.append(symbol)
             row.append(str(rank + 1))
-            lines.append(" ".join(row))
+            line = " ".join(row)
+            lines.append(line)
         lines.append(files)
         return "\n".join(lines)
 
@@ -269,21 +397,37 @@ class ChessGUI:
             lines.append(f"{idx // 2 + 1:>2}. {white:<8} {black:<8}")
         return "\n".join(lines)
 
-    def _evaluate(self, board: "chess.Board") -> float:
-        values = {
-            chess.PAWN: 1,
-            chess.KNIGHT: 3,
-            chess.BISHOP: 3,
-            chess.ROOK: 5,
-            chess.QUEEN: 9,
-            chess.KING: 0,
-        }
-        total = 0.0
-        for piece_type, value in values.items():
-            total += len(board.pieces(piece_type, chess.WHITE)) * value
-            total -= len(board.pieces(piece_type, chess.BLACK)) * value
-        return total
-
     def _on_close(self) -> None:
         self.ai.close()
         self.root.destroy()
+
+    def _configure_geometry(self) -> None:
+        board_width = 32 * 18  # approx width per char * columns
+        board_height = 12 * 36  # approx height per char * rows
+        moves_width = 160
+        padding = 24
+        total_w = board_width + moves_width + padding
+        total_h = board_height + padding
+        self.root.geometry(f"{total_w}x{total_h}")
+        self.root.resizable(False, False)
+
+    def _bring_to_front(self) -> None:
+        try:
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self._focus_binding = self.root.bind("<FocusIn>", self._release_topmost, add="+")
+        except tk.TclError:
+            self._focus_binding = None
+
+    def _release_topmost(self, _event: tk.Event | None = None) -> None:
+        try:
+            self.root.attributes("-topmost", False)
+        except tk.TclError:
+            pass
+        finally:
+            if getattr(self, "_focus_binding", None) is not None:
+                try:
+                    self.root.unbind("<FocusIn>", self._focus_binding)
+                except tk.TclError:
+                    pass
+                self._focus_binding = None

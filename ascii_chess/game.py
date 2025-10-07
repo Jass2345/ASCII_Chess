@@ -10,10 +10,9 @@ except ImportError:  # pragma: no cover - dependency to be installed by user
 
 from .ai import EngineConfig, StockfishAI
 from .renderer import AsciiRenderer
-from .taunts import TauntManager
 
 
-DEFAULT_PROMPT = "Enter move in SAN (e.g. Nf3, O-O, cxd4, resign, help)."
+DEFAULT_PROMPT = "Enter move in SAN (e.g. Nf3, O-O, cxd4, ff, help)."
 
 
 @dataclass
@@ -27,18 +26,21 @@ class GameController:
         self,
         renderer: Optional[AsciiRenderer] = None,
         ai: Optional[StockfishAI] = None,
-        taunts: Optional[TauntManager] = None,
         engine_config: Optional[EngineConfig] = None,
     ) -> None:
         if chess is None:
             raise RuntimeError("python-chess is required to run the game.")
         self.renderer = renderer or AsciiRenderer()
         self.ai = ai or StockfishAI(config=engine_config)
-        self.taunts = taunts or TauntManager()
         self.state = GameState()
         self.last_message = DEFAULT_PROMPT
+        self.enemy_status = ""
         self._running = True
         self._resigned = False
+        self._forfeited = False
+        self._quit_requested = False
+        self._forced_outcome = None
+        self._forced_outcome: Optional[str] = None
 
     def run(self) -> None:
         try:
@@ -50,7 +52,11 @@ class GameController:
                     break
                 if not aborted:
                     self._render()
-                    self._announce_result(self.state.board)
+                    if self._forced_outcome:
+                        self._announce_forced_outcome(self._forced_outcome)
+                        self._forced_outcome = None
+                    else:
+                        self._announce_result(self.state.board)
                 if not self._prompt_play_again():
                     self._running = False
                 else:
@@ -66,7 +72,7 @@ class GameController:
         while True:
             try:
                 rating_str = input(
-                    f"Set AI Elo ({min_rating}-{max_rating}, default {default_rating}): "
+                    f"Set Enemy Elo ({min_rating}-{max_rating}, default {default_rating}): "
                 ).strip()
                 if not rating_str:
                     return default_rating
@@ -81,35 +87,50 @@ class GameController:
         board = self.state.board
         assert board is not None
         self._resigned = False
+        self._forfeited = False
+        self._quit_requested = False
         self.last_message = DEFAULT_PROMPT
 
         while not board.is_game_over(claim_draw=True):
             move = self._prompt_move(board)
             if move is None:
+                if self._forced_outcome:
+                    forced_messages = {
+                        "win": "Player wins!",
+                        "lose": "Enemy wins!",
+                        "draw": "Draw.",
+                    }
+                    self.last_message = forced_messages[self._forced_outcome]
+                    self.enemy_status = ""
+                    return False
+                if self._quit_requested:
+                    return True
                 if self._resigned:
-                    self.last_message = "You resigned."
+                    self.last_message = "Player forfeited."
                 elif not self._running:
                     self.last_message = "Exiting game..."
                 else:
                     self.last_message = "Game aborted."
+                self.enemy_status = ""
                 self._render()
                 return True
 
             player_san = board.san(move)
             board.push(move)
             self.state.move_history.append(player_san)
-            self.last_message = "AI is thinking..."
+            self.last_message = "Enemy is thinking..."
+            self.enemy_status = "Calculating..."
             self._render()
 
             if board.is_game_over(claim_draw=True):
+                self.enemy_status = ""
                 break
 
             ai_move = self.ai.choose_move(board)
             ai_san = board.san(ai_move)
             board.push(ai_move)
             self.state.move_history.append(ai_san)
-            evaluation = self._evaluate(board)
-            self.taunts.choose(evaluation)
+            self.enemy_status = ""
             self.last_message = DEFAULT_PROMPT
 
         return False
@@ -120,23 +141,29 @@ class GameController:
             prompt = error_message or DEFAULT_PROMPT
             self.last_message = prompt
             self._render()
-            user_input = input("Your move (or command): ").strip()
+            user_input = input("Player move (or command): ").strip()
             if not user_input:
                 error_message = "Please enter a move."
                 continue
             lowered = user_input.lower()
+            if lowered in {"/win", "/lose", "/draw"}:
+                mapping = {"/win": "win", "/lose": "lose", "/draw": "draw"}
+                self._forced_outcome = mapping[lowered]
+                return None
             if lowered in {"quit", "exit"}:
                 self._running = False
+                self._quit_requested = True
                 return None
-            if lowered == "resign":
+            if lowered == "ff":
                 self._resigned = True
+                self._forfeited = True
                 return None
             if lowered == "help":
                 print(
                     "\nCommands:\n"
                     "  help    - show this message\n"
-                    "  resign  - concede the game\n"
-                    "  quit    - exit the program\n"
+                    "  ff      - forfeit the game\n"
+                    "  quit    - exit the program immediately\n"
                     "Enter chess moves in Standard Algebraic Notation (SAN).\n"
                 )
                 error_message = ""
@@ -147,40 +174,32 @@ class GameController:
             except ValueError:
                 error_message = f"Illegal move: {user_input}."
 
-    def _evaluate(self, board: "chess.Board") -> float:
-        values = {
-            chess.PAWN: 1,
-            chess.KNIGHT: 3,
-            chess.BISHOP: 3,
-            chess.ROOK: 5,
-            chess.QUEEN: 9,
-            chess.KING: 0,
-        }
-        total = 0.0
-        for piece_type, value in values.items():
-            total += len(board.pieces(piece_type, chess.WHITE)) * value
-            total -= len(board.pieces(piece_type, chess.BLACK)) * value
-        return total
-
     def _announce_result(self, board: "chess.Board") -> None:
         outcome = board.outcome(claim_draw=True)
         if outcome is None:
             if self._resigned:
-                winner = "Black" if board.turn == chess.WHITE else "White"
-                print(f"\nYou resigned. {winner} wins by resignation.")
+                print("\nPlayer forfeited. Enemy wins.")
             else:
                 print("\nGame ended prematurely.")
             return
         if outcome.winner is None:
-            message = "Game drawn."
+            message = "Draw."
         elif outcome.winner == chess.WHITE:
-            message = "White wins!"
+            message = "Player wins!"
         else:
-            message = "Black wins!"
+            message = "Enemy wins!"
         print("\n" + message)
         if outcome.termination:
             print(f"Reason: {outcome.termination.name.replace('_', ' ').title()}")
         print(f"Result: {outcome.result()}")
+
+    def _announce_forced_outcome(self, outcome: str) -> None:
+        messages = {
+            "win": "Player wins!",
+            "lose": "Enemy wins!",
+            "draw": "Draw.",
+        }
+        print("\n" + messages[outcome])
 
     def _prompt_play_again(self) -> bool:
         while True:
@@ -194,10 +213,12 @@ class GameController:
     def _reset_state(self) -> None:
         self.state.board = chess.Board()
         self.state.move_history.clear()
-        self.taunts.choose(0)
         self.last_message = DEFAULT_PROMPT
+        self.enemy_status = ""
         self._running = True
         self._resigned = False
+        self._forfeited = False
+        self._quit_requested = False
 
     def _render(self) -> None:
         board = self.state.board
@@ -206,6 +227,6 @@ class GameController:
             board,
             self.state.move_history,
             self.ai.rating,
-            self.taunts.last,
+            self.enemy_status,
             self.last_message,
         )
