@@ -11,7 +11,7 @@ except ImportError:  # pragma: no cover - optional dependency for scaffolding
     chess = None  # type: ignore
 
 
-DEFAULT_MIN_RATING = 800
+DEFAULT_MIN_RATING = 1350
 DEFAULT_MAX_RATING = 2850
 DEFAULT_TIME = 0.5
 

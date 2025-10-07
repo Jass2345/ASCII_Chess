@@ -17,8 +17,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--min-rating",
         type=int,
-        default=800,
-        help="Minimum Elo allowed for the AI (default: 800).",
+        default=1350,
+        help="Minimum Elo allowed for the AI (default: 1350, Stockfish limit).",
     )
     parser.add_argument(
         "--max-rating",

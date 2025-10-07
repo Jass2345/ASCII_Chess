@@ -60,15 +60,20 @@ class GameController:
 
     def _prompt_rating(self) -> int:
         self.renderer.render_title_screen()
+        min_rating = self.ai.config.min_rating
+        max_rating = self.ai.config.max_rating
+        default_rating = self.ai.rating
         while True:
             try:
-                rating_str = input("Set AI Elo (800-2850, default 1500): ").strip()
+                rating_str = input(
+                    f"Set AI Elo ({min_rating}-{max_rating}, default {default_rating}): "
+                ).strip()
                 if not rating_str:
-                    return 1500
+                    return default_rating
                 rating = int(rating_str)
-                if 800 <= rating <= 2850:
+                if min_rating <= rating <= max_rating:
                     return rating
-                print("Please enter a rating between 800 and 2850.")
+                print(f"Please enter a rating between {min_rating} and {max_rating}.")
             except ValueError:
                 print("Rating must be a number.")
 
