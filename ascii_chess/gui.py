@@ -18,6 +18,11 @@ MOVE_FONT = ("Menlo", 14)
 STATUS_FONT = ("Menlo", 12)
 PROMPT_FONT = ("Menlo", 12)
 
+ENEMY_BASE_COLOR = "#888"
+ENEMY_HIGHLIGHT_COLOR = "#ffcc33"
+ENEMY_BLINK_INTERVAL_MS = 350
+ENEMY_BLINK_TOGGLES = 6  # number of toggles (approx three flashes)
+
 
 class ChessGUI:
     def __init__(self, root: tk.Tk, engine_config: EngineConfig, use_unicode: bool = True) -> None:
@@ -37,7 +42,15 @@ class ChessGUI:
         self._awaiting_ai = False
         self._resigned = False
         self._forfeited = False
+        self._enemy_highlight_square: Optional[int] = None
+        self._enemy_blink_visible = True
+        self._enemy_blink_job: Optional[str] = None
+        self._enemy_blink_remaining = 0
+        self._is_rendering = False
+        self._ai_job: Optional[str] = None
         self._focus_binding: Optional[str] = None
+        self._ai_job: Optional[str] = None
+        self._closing = False
         self._build_widgets()
         self._configure_geometry()
         self._bring_to_front()
@@ -57,8 +70,10 @@ class ChessGUI:
             bg="#111",
             fg="#eee",
             state=tk.DISABLED,
+            bd=0,
+            highlightthickness=0,
         )
-        self.board_text.grid(row=0, column=0, rowspan=2, sticky="nsew")
+        self.board_text.grid(row=0, column=0, rowspan=2, sticky="nw")
 
         # Moves display
         moves_frame = tk.Frame(main_frame)
@@ -84,7 +99,7 @@ class ChessGUI:
         self.status_label = tk.Label(input_frame, text="Welcome, Player!", font=STATUS_FONT)
         self.status_label.pack(anchor="w")
 
-        self.enemy_label = tk.Label(input_frame, text="Enemy: Ready", font=STATUS_FONT, fg="#888")
+        self.enemy_label = tk.Label(input_frame, text="Enemy: Ready", font=STATUS_FONT, fg=ENEMY_BASE_COLOR)
         self.enemy_label.pack(anchor="w", pady=(4, 8))
         self.input_frame = input_frame
 
@@ -107,9 +122,9 @@ class ChessGUI:
         help_label.pack(anchor="w", pady=(8, 0))
 
         # Configure grid weights
-        main_frame.columnconfigure(0, weight=3)
-        main_frame.columnconfigure(1, weight=2)
-        main_frame.rowconfigure(0, weight=4)
+        main_frame.columnconfigure(0, weight=0)
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(0, weight=0)
         main_frame.rowconfigure(1, weight=1)
 
     def _show_intro_screen(self) -> None:
@@ -183,6 +198,7 @@ class ChessGUI:
         self.intro_frame.destroy()
         del self.intro_frame
         del self.blink_label
+        self._stop_enemy_blink()
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         self.status_label.config(text="Enter Enemy Elo (1350-2850, default 1500):")
         self.move_entry.delete(0, tk.END)
@@ -191,6 +207,15 @@ class ChessGUI:
         self.move_entry.focus_set()
         self.move_entry.bind("<Return>", self._on_submit_with_rating)
         self.submit_button.configure(command=self._on_submit_with_rating)
+        board_text = self._board_to_text(self.board)
+        lines = board_text.splitlines() or [""]
+        max_cols = max(len(line) for line in lines)
+        self.board_text.config(state=tk.NORMAL)
+        self.board_text.delete("1.0", tk.END)
+        self.board_text.insert(tk.END, board_text)
+        self.board_text.config(state=tk.DISABLED)
+        self.board_text.configure(width=max_cols, height=len(lines))
+        self.moves_text.configure(height=max(int(len(lines) * 1.5), 6))
 
     def _on_submit_with_rating(self, event: tk.Event | None = None) -> None:
         text = self.move_entry.get().strip()
@@ -207,7 +232,8 @@ class ChessGUI:
         self.move_entry.delete(0, tk.END)
         self.ai.set_rating(rating)
         self.status_label.config(text=f"Enemy rating: {rating} Elo. Player to move.")
-        self.enemy_label.config(text="Enemy: Ready")
+        self._stop_enemy_blink()
+        self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
         self._resigned = False
         self._forfeited = False
         self._awaiting_ai = False
@@ -216,10 +242,12 @@ class ChessGUI:
         self._render()
 
     def _on_submit(self, event: Optional[tk.Event] = None) -> None:
-        if self._awaiting_ai:
-            return
         text = self.move_entry.get().strip()
         if not text:
+            return
+        lowered = text.lower()
+        if self._awaiting_ai and lowered not in {"quit", "ff", "/win", "/lose", "/draw", "help"}:
+            self.status_label.config(text="Enemy is thinking... please wait.")
             return
         self.move_entry.delete(0, tk.END)
         self._handle_player_input(text)
@@ -239,14 +267,23 @@ class ChessGUI:
             )
             return
         if lowered == "quit":
-            self.root.destroy()
+            self._stop_enemy_blink()
+            if self._ai_job is not None:
+                try:
+                    self.root.after_cancel(self._ai_job)
+                except tk.TclError:
+                    pass
+                self._ai_job = None
+            self._awaiting_ai = False
+            self._exit_game()
             return
         if lowered == "ff":
+            self._stop_enemy_blink()
             self._resigned = True
             self._forfeited = True
             self._awaiting_ai = False
             self.status_label.config(text="Player forfeited. Enemy wins.")
-            self.enemy_label.config(text="Enemy: Victory")
+            self.enemy_label.config(text="Enemy: Victory", fg=ENEMY_BASE_COLOR)
             messagebox.showinfo("Game over", "Player forfeited. Enemy wins.", parent=self.root)
             self._ask_play_again()
             return
@@ -261,7 +298,7 @@ class ChessGUI:
         self.board.push(move)
         self.move_history.append(san)
         self.status_label.config(text="Enemy is thinking...")
-        self.enemy_label.config(text="Enemy: Calculating...")
+        self.enemy_label.config(text="Enemy: Calculating...", fg=ENEMY_BASE_COLOR)
         self._render()
 
         if self.board.is_game_over(claim_draw=True):
@@ -269,7 +306,7 @@ class ChessGUI:
             return
 
         self._awaiting_ai = True
-        self.root.after(100, self._play_ai_move)
+        self._ai_job = self.root.after(100, self._play_ai_move)
 
     def _play_ai_move(self) -> None:
         try:
@@ -277,31 +314,34 @@ class ChessGUI:
         except Exception as exc:  # pragma: no cover - engine errors are unexpected
             messagebox.showerror("Engine error", str(exc), parent=self.root)
             self._awaiting_ai = False
+            self._ai_job = None
             return
 
+        self._ai_job = None
         san = self.board.san(ai_move)
         self.board.push(ai_move)
         self.move_history.append(san)
-        self.enemy_label.config(text=f"Enemy: {san}")
+        self.enemy_label.config(text=f"Enemy: {san}", fg=ENEMY_BASE_COLOR)
         self.status_label.config(text="Player to move.")
         self._awaiting_ai = False
-        self._render()
+        self._start_enemy_blink(ai_move.to_square)
 
         if self.board.is_game_over(claim_draw=True):
             self._announce_result()
 
     def _handle_forced_outcome(self, outcome: str) -> None:
+        self._stop_enemy_blink()
         mapping = {
-            "win": ("플레이어가 승리했습니다.", "Enemy: Defeated"),
-            "lose": ("Enemy 승리.", "Enemy: Victory"),
-            "draw": ("무승부입니다.", "Enemy: Draw"),
+            "win": ("Player wins!", "Enemy: Defeated"),
+            "lose": ("Enemy wins!", "Enemy: Victory"),
+            "draw": ("Draw.", "Enemy: Draw"),
         }
-        message, enemy_text = mapping.get(outcome, ("무승부입니다.", "Enemy: Draw"))
+        message, enemy_text = mapping.get(outcome, ("Draw.", "Enemy: Draw"))
         self._awaiting_ai = False
         self._resigned = False
         self._forfeited = False
         self.status_label.config(text=message)
-        self.enemy_label.config(text=enemy_text)
+        self.enemy_label.config(text=enemy_text, fg=ENEMY_BASE_COLOR)
         messagebox.showinfo("Game over", message, parent=self.root)
         self._ask_play_again()
 
@@ -333,35 +373,50 @@ class ChessGUI:
         if again:
             self._reset_game()
         else:
-            self.root.quit()
+            self._exit_game()
 
     def _reset_game(self) -> None:
         self.board = chess.Board()
         self.move_history.clear()
-        self.enemy_label.config(text="Enemy: Ready")
+        self._stop_enemy_blink()
+        self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
         self.status_label.config(text="New game! Player to move.")
         self._resigned = False
         self._forfeited = False
         self._awaiting_ai = False
+        self._closing = False
+        if self._ai_job is not None:
+            try:
+                self.root.after_cancel(self._ai_job)
+            except tk.TclError:
+                pass
+            self._ai_job = None
         self._render()
 
     def _render(self) -> None:
-        board_text = self._board_to_text(self.board)
-        moves_text = self._moves_to_text(self.move_history)
+        if self._is_rendering:
+            return
+        self._is_rendering = True
+        try:
+            board_text = self._board_to_text(self.board)
+            moves_text = self._moves_to_text(self.move_history)
 
-        lines = board_text.splitlines() or [""]
-        max_cols = max(len(line) for line in lines)
+            lines = board_text.splitlines() or [""]
+            max_cols = max(len(line) for line in lines)
+            self.board_text.config(state=tk.NORMAL)
+            self.board_text.delete("1.0", tk.END)
+            self.board_text.insert(tk.END, board_text)
+            self.board_text.config(state=tk.DISABLED)
+            board_lines = len(lines)
+            self.board_text.configure(width=max_cols, height=board_lines)
 
-        self.board_text.config(state=tk.NORMAL)
-        self.board_text.delete("1.0", tk.END)
-        self.board_text.insert(tk.END, board_text)
-        self.board_text.config(state=tk.DISABLED)
-        self.board_text.configure(width=max_cols, height=len(lines))
-
-        self.moves_text.config(state=tk.NORMAL)
-        self.moves_text.delete("1.0", tk.END)
-        self.moves_text.insert(tk.END, moves_text)
-        self.moves_text.config(state=tk.DISABLED)
+            self.moves_text.config(state=tk.NORMAL)
+            self.moves_text.delete("1.0", tk.END)
+            self.moves_text.insert(tk.END, moves_text)
+            self.moves_text.config(state=tk.DISABLED)
+            self.moves_text.configure(height=max(int(board_lines * 1.5), 6))
+        finally:
+            self._is_rendering = False
 
     def _board_to_text(self, board: "chess.Board") -> str:
         files = "  a b c d e f g h"
@@ -371,11 +426,15 @@ class ChessGUI:
             for file in range(8):
                 square = chess.square(file, rank)
                 piece = board.piece_at(square)
+                bg_char = LIGHT_SQUARE if (rank + file) % 2 else DARK_SQUARE
                 if piece is None:
-                    row.append(LIGHT_SQUARE)
+                    row.append(bg_char)
                 else:
                     symbol = self._piece_symbol(piece.symbol())
-                    row.append(symbol)
+                    if self._enemy_highlight_square == square and not self._enemy_blink_visible:
+                        row.append(bg_char)
+                    else:
+                        row.append(symbol)
             row.append(str(rank + 1))
             line = " ".join(row)
             lines.append(line)
@@ -398,13 +457,84 @@ class ChessGUI:
         return "\n".join(lines)
 
     def _on_close(self) -> None:
+        self._stop_enemy_blink()
         self.ai.close()
         self.root.destroy()
 
+    def _start_enemy_blink(self, square: int) -> None:
+        self._stop_enemy_blink()
+        self._enemy_highlight_square = square
+        self._enemy_blink_visible = False
+        self._enemy_blink_remaining = ENEMY_BLINK_TOGGLES
+        self.enemy_label.config(fg=ENEMY_HIGHLIGHT_COLOR)
+        self._render()
+        if self._enemy_blink_remaining > 0:
+            self._enemy_blink_job = self.root.after(ENEMY_BLINK_INTERVAL_MS, self._enemy_blink_step)
+
+    def _enemy_blink_step(self) -> None:
+        if self._enemy_blink_remaining <= 0:
+            self._stop_enemy_blink()
+            return
+        self._enemy_blink_visible = not self._enemy_blink_visible
+        self._enemy_blink_remaining -= 1
+        self.enemy_label.config(
+            fg=ENEMY_HIGHLIGHT_COLOR if self._enemy_blink_visible else ENEMY_BASE_COLOR
+        )
+        self._render()
+        if self._enemy_blink_remaining > 0:
+            self._enemy_blink_job = self.root.after(
+                ENEMY_BLINK_INTERVAL_MS, self._enemy_blink_step
+            )
+        else:
+            self._enemy_blink_job = self.root.after(
+                ENEMY_BLINK_INTERVAL_MS, self._stop_enemy_blink
+            )
+
+    def _stop_enemy_blink(self) -> None:
+        if self._enemy_blink_job is not None:
+            try:
+                self.root.after_cancel(self._enemy_blink_job)
+            except tk.TclError:
+                pass
+            self._enemy_blink_job = None
+        highlight_was_set = self._enemy_highlight_square is not None
+        self._enemy_highlight_square = None
+        self._enemy_blink_visible = True
+        self._enemy_blink_remaining = 0
+        if self.enemy_label.cget("fg") != ENEMY_BASE_COLOR:
+            self.enemy_label.config(fg=ENEMY_BASE_COLOR)
+        if highlight_was_set and not self._is_rendering:
+            self._render()
+
+    def _exit_game(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
+        self._stop_enemy_blink()
+        if self._ai_job is not None:
+            try:
+                self.root.after_cancel(self._ai_job)
+            except tk.TclError:
+                pass
+            self._ai_job = None
+        self._awaiting_ai = False
+        try:
+            self.ai.close()
+        except Exception:
+            pass
+        try:
+            self.root.quit()
+        except tk.TclError:
+            pass
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+
     def _configure_geometry(self) -> None:
         board_width = 32 * 18  # approx width per char * columns
-        board_height = 12 * 36  # approx height per char * rows
-        moves_width = 160
+        board_height = 12 * 36  # placeholder baseline
+        moves_width = 150
         padding = 24
         total_w = board_width + moves_width + padding
         total_h = board_height + padding
