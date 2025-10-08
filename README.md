@@ -1,6 +1,7 @@
 # ASCII Chess
 
 HNU 2025 ESP course Fall - vibe coding (윤여명, 정재석, 지민우)
+
 터미널 또는 GUI 환경에서 Stockfish 엔진과 대국할 수 있는 ASCII 기반 체스 프로그램입니다. 플레이어는 SAN 형태로 수를 입력하며, Enemy(Stockfish)와 번갈아 대국합니다.
 
 ## 주요 특징
