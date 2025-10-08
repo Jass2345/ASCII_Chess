@@ -13,10 +13,11 @@ from .ai import EngineConfig, StockfishAI
 from .renderer import ASCII_PIECES, LIGHT_SQUARE, DARK_SQUARE, UNICODE_PIECES
 
 
-BOARD_FONT = ("Menlo", 32)
-MOVE_FONT = ("Menlo", 14)
-STATUS_FONT = ("Menlo", 12)
-PROMPT_FONT = ("Menlo", 12)
+# 고정폭 폰트 사용으로 체크판 자간 정렬
+BOARD_FONT = ("Courier New", 28)
+MOVE_FONT = ("Courier New", 12)
+STATUS_FONT = ("Arial", 11)
+PROMPT_FONT = ("Courier New", 11)
 
 ENEMY_BASE_COLOR = "#888"
 ENEMY_HIGHLIGHT_COLOR = "#ffcc33"
@@ -60,37 +61,59 @@ class ChessGUI:
         main_frame.pack(fill=tk.BOTH, expand=True)
         self.main_frame = main_frame
 
+        # 보드 텍스트 위젯 - 스크롤바 추가
+        board_container = tk.Frame(main_frame)
+        board_container.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 12))
+        
+        board_scroll_y = tk.Scrollbar(board_container, orient=tk.VERTICAL)
+        board_scroll_x = tk.Scrollbar(board_container, orient=tk.HORIZONTAL)
+        
         self.board_text = tk.Text(
-            main_frame,
-            width=2,
-            height=2,
+            board_container,
+            width=20,
+            height=12,
             font=BOARD_FONT,
             bg="#111",
             fg="#eee",
             state=tk.DISABLED,
             bd=0,
             highlightthickness=0,
+            wrap=tk.NONE,
+            yscrollcommand=board_scroll_y.set,
+            xscrollcommand=board_scroll_x.set,
         )
-        self.board_text.grid(row=0, column=0, rowspan=2, sticky="nw")
+        board_scroll_y.config(command=self.board_text.yview)
+        board_scroll_x.config(command=self.board_text.xview)
+        
+        self.board_text.grid(row=0, column=0, sticky="nsew")
+        board_scroll_y.grid(row=0, column=1, sticky="ns")
+        board_scroll_x.grid(row=1, column=0, sticky="ew")
+        
+        board_container.rowconfigure(0, weight=1)
+        board_container.columnconfigure(0, weight=1)
 
         moves_frame = tk.Frame(main_frame)
-        moves_frame.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        moves_frame.grid(row=0, column=1, sticky="nsew")
         self.moves_frame = moves_frame
 
         moves_label = tk.Label(moves_frame, text="Moves", font=STATUS_FONT)
         moves_label.pack(anchor="w")
 
+        moves_scroll = tk.Scrollbar(moves_frame, orient=tk.VERTICAL)
         self.moves_text = tk.Text(
             moves_frame,
             width=18,
             height=18,
             font=MOVE_FONT,
             state=tk.DISABLED,
+            yscrollcommand=moves_scroll.set,
         )
-        self.moves_text.pack(fill=tk.BOTH, expand=True)
+        moves_scroll.config(command=self.moves_text.yview)
+        self.moves_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        moves_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         input_frame = tk.Frame(main_frame)
-        input_frame.grid(row=1, column=1, sticky="nsew", padx=(12, 0), pady=(12, 0))
+        input_frame.grid(row=1, column=1, sticky="sew", pady=(12, 0))
 
         self.status_label = tk.Label(input_frame, text="Welcome, Player!", font=STATUS_FONT)
         self.status_label.pack(anchor="w")
@@ -117,10 +140,11 @@ class ChessGUI:
         )
         help_label.pack(anchor="w", pady=(8, 0))
 
-        main_frame.columnconfigure(0, weight=0)
-        main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(0, weight=0)
-        main_frame.rowconfigure(1, weight=1)
+        # Grid 가중치 설정 - 창 크기 변경 시 자동 확장
+        main_frame.columnconfigure(0, weight=1)  # 보드 영역 확장
+        main_frame.columnconfigure(1, weight=1)  # 기보/입력 영역 확장
+        main_frame.rowconfigure(0, weight=1)     # 상단 영역 확장
+        main_frame.rowconfigure(1, weight=0)     # 입력 영역은 고정
 
     def _show_intro_screen(self) -> None:
         # 인트로 화면을 표시하고 엔터 입력을 기다린다
@@ -205,14 +229,10 @@ class ChessGUI:
         self.move_entry.bind("<Return>", self._on_submit_with_rating)
         self.submit_button.configure(command=self._on_submit_with_rating)
         board_text = self._board_to_text(self.board)
-        lines = board_text.splitlines() or [""]
-        max_cols = max(len(line) for line in lines)
         self.board_text.config(state=tk.NORMAL)
         self.board_text.delete("1.0", tk.END)
         self.board_text.insert(tk.END, board_text)
         self.board_text.config(state=tk.DISABLED)
-        self.board_text.configure(width=max_cols, height=len(lines))
-        self.moves_text.configure(height=max(int(len(lines) * 1.5), 6))
 
     def _on_submit_with_rating(self, event: tk.Event | None = None) -> None:
         text = self.move_entry.get().strip()
@@ -405,43 +425,45 @@ class ChessGUI:
             board_text = self._board_to_text(self.board)
             moves_text = self._moves_to_text(self.move_history)
 
-            lines = board_text.splitlines() or [""]
-            max_cols = max(len(line) for line in lines)
             self.board_text.config(state=tk.NORMAL)
             self.board_text.delete("1.0", tk.END)
             self.board_text.insert(tk.END, board_text)
             self.board_text.config(state=tk.DISABLED)
-            board_lines = len(lines)
-            self.board_text.configure(width=max_cols, height=board_lines)
 
             self.moves_text.config(state=tk.NORMAL)
             self.moves_text.delete("1.0", tk.END)
             self.moves_text.insert(tk.END, moves_text)
             self.moves_text.config(state=tk.DISABLED)
-            self.moves_text.configure(height=max(int(board_lines * 1.5), 6))
         finally:
             self._is_rendering = False
 
     def _board_to_text(self, board: "chess.Board") -> str:
-        # 보드 상태를 텍스트 행렬로 변환한다
-        files = "  a b c d e f g h"
+        # 보드 상태를 텍스트 행렬로 변환한다 (고정폭 폰트에 맞춘 간격)
+        # 파일 레이블: 각 문자 사이에 2칸 공백으로 체스판 칸과 정렬
+        files = "   a  b  c  d  e  f  g  h"
         lines = [files]
         for rank in range(7, -1, -1):
-            row = [str(rank + 1)]
+            row_parts = [str(rank + 1) + " "]
             for file in range(8):
                 square = chess.square(file, rank)
                 piece = board.piece_at(square)
                 bg_char = LIGHT_SQUARE if (rank + file) % 2 else DARK_SQUARE
+                
                 if piece is None:
-                    row.append(bg_char)
+                    # 빈 칸: 배경 문자를 중앙에 배치 (양쪽 공백)
+                    cell = " " + bg_char + " "
                 else:
                     symbol = self._piece_symbol(piece.symbol())
                     if self._enemy_highlight_square == square and not self._enemy_blink_visible:
-                        row.append(bg_char)
+                        cell = " " + bg_char + " "
                     else:
-                        row.append(symbol)
-            row.append(str(rank + 1))
-            line = " ".join(row)
+                        # 기물: 중앙에 배치 (양쪽 공백)
+                        cell = " " + symbol + " "
+                
+                row_parts.append(cell)
+            
+            row_parts.append(str(rank + 1))
+            line = "".join(row_parts)
             lines.append(line)
         lines.append(files)
         return "\n".join(lines)
@@ -538,15 +560,21 @@ class ChessGUI:
             pass
 
     def _configure_geometry(self) -> None:
-        # 고정 창 크기를 계산하기 위한 기준 값
+        # 유동적인 창 크기 설정 - 사용자가 조절 가능
         board_width = 32 * 18
         board_height = 12 * 36
         moves_width = 150
         padding = 24
         total_w = board_width + moves_width + padding
         total_h = board_height + padding
+        
+        # 최소 크기 설정
+        min_w = 700
+        min_h = 500
+        
         self.root.geometry(f"{total_w}x{total_h}")
-        self.root.resizable(False, False)
+        self.root.minsize(min_w, min_h)
+        self.root.resizable(True, True)  # 크기 조절 가능하게 변경
 
     def _bring_to_front(self) -> None:
         try:
