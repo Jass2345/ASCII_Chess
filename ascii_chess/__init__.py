@@ -1,5 +1,3 @@
-"""ASCII Chess package scaffolding for CLI gameplay against Stockfish."""
-
 from __future__ import annotations
 
 from typing import Any

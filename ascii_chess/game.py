@@ -30,6 +30,7 @@ class GameController:
     ) -> None:
         if chess is None:
             raise RuntimeError("python-chess is required to run the game.")
+        # 엔진과 렌더러를 준비하고 게임 상태를 초기화한다
         self.renderer = renderer or AsciiRenderer()
         self.ai = ai or StockfishAI(config=engine_config)
         self.state = GameState()
@@ -39,10 +40,10 @@ class GameController:
         self._resigned = False
         self._forfeited = False
         self._quit_requested = False
-        self._forced_outcome = None
         self._forced_outcome: Optional[str] = None
 
     def run(self) -> None:
+        # 레이팅 설정부터 재시작 여부 확인까지 전체 게임 흐름을 제어한다
         try:
             while self._running:
                 rating = self._prompt_rating()
@@ -65,6 +66,7 @@ class GameController:
             self.ai.close()
 
     def _prompt_rating(self) -> int:
+        # 플레이어에게 Enemy의 레이팅을 입력받는다
         self.renderer.render_title_screen()
         min_rating = self.ai.config.min_rating
         max_rating = self.ai.config.max_rating
@@ -84,6 +86,7 @@ class GameController:
                 print("Rating must be a number.")
 
     def _start_game_loop(self) -> bool:
+        # 플레이어와 Enemy의 번갈아 둔 수를 처리한다
         board = self.state.board
         assert board is not None
         self._resigned = False
@@ -136,6 +139,7 @@ class GameController:
         return False
 
     def _prompt_move(self, board: "chess.Board") -> Optional["chess.Move"]:
+        # 사용자의 입력을 검사해 명령 또는 합법적인 수를 반환한다
         error_message = ""
         while True:
             prompt = error_message or DEFAULT_PROMPT
@@ -175,6 +179,7 @@ class GameController:
                 error_message = f"Illegal move: {user_input}."
 
     def _announce_result(self, board: "chess.Board") -> None:
+        # 정상 종료된 게임의 결과를 출력한다
         outcome = board.outcome(claim_draw=True)
         if outcome is None:
             if self._resigned:
@@ -194,6 +199,7 @@ class GameController:
         print(f"Result: {outcome.result()}")
 
     def _announce_forced_outcome(self, outcome: str) -> None:
+        # 개발자 테스트용 강제 결과 메시지를 출력한다
         messages = {
             "win": "Player wins!",
             "lose": "Enemy wins!",
@@ -202,6 +208,7 @@ class GameController:
         print("\n" + messages[outcome])
 
     def _prompt_play_again(self) -> bool:
+        # 재시작 여부를 입력받는다
         while True:
             choice = input("Play again? (y/n): ").strip().lower()
             if choice in {"y", "yes"}:
@@ -211,6 +218,7 @@ class GameController:
             print("Please answer with y or n.")
 
     def _reset_state(self) -> None:
+        # 새 게임을 위한 상태를 초기화한다
         self.state.board = chess.Board()
         self.state.move_history.clear()
         self.last_message = DEFAULT_PROMPT
@@ -221,6 +229,7 @@ class GameController:
         self._quit_requested = False
 
     def _render(self) -> None:
+        # CLI 렌더러에 현재 상태를 전달한다
         board = self.state.board
         assert board is not None
         self.renderer.render_board(

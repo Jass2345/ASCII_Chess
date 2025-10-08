@@ -21,7 +21,7 @@ PROMPT_FONT = ("Menlo", 12)
 ENEMY_BASE_COLOR = "#888"
 ENEMY_HIGHLIGHT_COLOR = "#ffcc33"
 ENEMY_BLINK_INTERVAL_MS = 350
-ENEMY_BLINK_TOGGLES = 6  # number of toggles (approx three flashes)
+ENEMY_BLINK_TOGGLES = 6  # 점멸 횟수 (약 세 번)
 
 
 class ChessGUI:
@@ -36,7 +36,6 @@ class ChessGUI:
         self.engine_config = engine_config
         self.ai = StockfishAI(config=self.engine_config)
         self.use_unicode = use_unicode
-
         self.board = chess.Board()
         self.move_history: List[str] = []
         self._awaiting_ai = False
@@ -49,7 +48,6 @@ class ChessGUI:
         self._is_rendering = False
         self._ai_job: Optional[str] = None
         self._focus_binding: Optional[str] = None
-        self._ai_job: Optional[str] = None
         self._closing = False
         self._build_widgets()
         self._configure_geometry()
@@ -57,11 +55,11 @@ class ChessGUI:
         self._show_intro_screen()
 
     def _build_widgets(self) -> None:
+        # 보드 영역과 기보·입력 영역을 초기화한다
         main_frame = tk.Frame(self.root, padx=12, pady=12)
         main_frame.pack(fill=tk.BOTH, expand=True)
         self.main_frame = main_frame
 
-        # Board display
         self.board_text = tk.Text(
             main_frame,
             width=2,
@@ -75,7 +73,6 @@ class ChessGUI:
         )
         self.board_text.grid(row=0, column=0, rowspan=2, sticky="nw")
 
-        # Moves display
         moves_frame = tk.Frame(main_frame)
         moves_frame.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
         self.moves_frame = moves_frame
@@ -92,7 +89,6 @@ class ChessGUI:
         )
         self.moves_text.pack(fill=tk.BOTH, expand=True)
 
-        # Status + input
         input_frame = tk.Frame(main_frame)
         input_frame.grid(row=1, column=1, sticky="nsew", padx=(12, 0), pady=(12, 0))
 
@@ -121,13 +117,13 @@ class ChessGUI:
         )
         help_label.pack(anchor="w", pady=(8, 0))
 
-        # Configure grid weights
         main_frame.columnconfigure(0, weight=0)
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(0, weight=0)
         main_frame.rowconfigure(1, weight=1)
 
     def _show_intro_screen(self) -> None:
+        # 인트로 화면을 표시하고 엔터 입력을 기다린다
         self.main_frame.pack_forget()
 
         self.intro_frame = tk.Frame(self.root, bg="#111", padx=40, pady=40)
@@ -192,6 +188,7 @@ class ChessGUI:
         self.root.after(500, self._blink)
 
     def _start_game_from_intro(self, event: tk.Event | None = None) -> None:
+        # 인트로 종료 후 기본 판과 입력 상태를 세팅한다
         if not hasattr(self, "intro_frame"):
             return
         self.root.unbind("<Return>")
@@ -242,6 +239,7 @@ class ChessGUI:
         self._render()
 
     def _on_submit(self, event: Optional[tk.Event] = None) -> None:
+        # 현재 입력 값에 따라 명령 또는 수를 처리한다
         text = self.move_entry.get().strip()
         if not text:
             return
@@ -253,6 +251,7 @@ class ChessGUI:
         self._handle_player_input(text)
 
     def _handle_player_input(self, user_input: str) -> None:
+        # 특수 명령과 SAN 입력을 판별하여 처리한다
         lowered = user_input.lower()
         if lowered in {"/win", "/lose", "/draw"}:
             outcome = lowered[1:]
@@ -309,6 +308,7 @@ class ChessGUI:
         self._ai_job = self.root.after(100, self._play_ai_move)
 
     def _play_ai_move(self) -> None:
+        # Enemy가 수를 계산해 둔 뒤 화면과 상태를 갱신한다
         try:
             ai_move = self.ai.choose_move(self.board)
         except Exception as exc:  # pragma: no cover - engine errors are unexpected
@@ -330,6 +330,7 @@ class ChessGUI:
             self._announce_result()
 
     def _handle_forced_outcome(self, outcome: str) -> None:
+        # 개발자 테스트 명령으로 강제 종료 시 메시지를 출력한다
         self._stop_enemy_blink()
         mapping = {
             "win": ("Player wins!", "Enemy: Defeated"),
@@ -346,6 +347,7 @@ class ChessGUI:
         self._ask_play_again()
 
     def _announce_result(self) -> None:
+        # 실제 대국 결과를 팝업으로 알리고 재도전을 묻는다
         outcome = self.board.outcome(claim_draw=True)
         if outcome is None:
             result_text = "Game ended prematurely."
@@ -376,6 +378,7 @@ class ChessGUI:
             self._exit_game()
 
     def _reset_game(self) -> None:
+        # 새 대국을 시작하기 위한 상태 초기화
         self.board = chess.Board()
         self.move_history.clear()
         self._stop_enemy_blink()
@@ -394,6 +397,7 @@ class ChessGUI:
         self._render()
 
     def _render(self) -> None:
+        # 보드와 기보 텍스트를 최신 상태로 갱신한다
         if self._is_rendering:
             return
         self._is_rendering = True
@@ -419,6 +423,7 @@ class ChessGUI:
             self._is_rendering = False
 
     def _board_to_text(self, board: "chess.Board") -> str:
+        # 보드 상태를 텍스트 행렬로 변환한다
         files = "  a b c d e f g h"
         lines = [files]
         for rank in range(7, -1, -1):
@@ -507,6 +512,7 @@ class ChessGUI:
             self._render()
 
     def _exit_game(self) -> None:
+        # 창을 안전하게 종료하며 모든 예약 작업을 정리한다
         if self._closing:
             return
         self._closing = True
@@ -532,8 +538,9 @@ class ChessGUI:
             pass
 
     def _configure_geometry(self) -> None:
-        board_width = 32 * 18  # approx width per char * columns
-        board_height = 12 * 36  # placeholder baseline
+        # 고정 창 크기를 계산하기 위한 기준 값
+        board_width = 32 * 18
+        board_height = 12 * 36
         moves_width = 150
         padding = 24
         total_w = board_width + moves_width + padding

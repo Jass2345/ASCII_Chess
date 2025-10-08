@@ -5,7 +5,6 @@ import platform
 import shutil
 import sys
 import subprocess
-import sys
 from dataclasses import dataclass
 from typing import Optional
 

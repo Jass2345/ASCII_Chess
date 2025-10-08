@@ -1,4 +1,3 @@
-"""Entry point for the ASCII CLI chess experience against Stockfish."""
 from __future__ import annotations
 
 import argparse
@@ -8,6 +7,7 @@ from ascii_chess.deps import collect_dependency_status
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    # 명령줄 인자 정의 및 파싱
     parser = argparse.ArgumentParser(description="ASCII CLI Chess vs Stockfish")
     parser.add_argument(
         "--engine-path",
@@ -51,6 +51,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # 실행 환경 점검 후 CLI 또는 GUI 진입점을 수행
     args = parse_args(argv or sys.argv[1:])
 
     deps = collect_dependency_status(

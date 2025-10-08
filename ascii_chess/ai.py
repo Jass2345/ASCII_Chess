@@ -25,7 +25,7 @@ class EngineConfig:
 
 
 class StockfishAI:
-    """Thin wrapper around the Stockfish engine controlled through python-chess."""
+    # Stockfish 엔진과 통신하는 래퍼 클래스
 
     def __init__(self, config: EngineConfig | None = None) -> None:
         if chess is None:

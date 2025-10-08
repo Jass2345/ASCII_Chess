@@ -43,13 +43,12 @@ LIGHT_SQUARE = "·"
 DARK_SQUARE = ":"
 
 class AsciiRenderer:
-    """Responsible for rendering the CLI experience."""
+    # CLI 화면에 보드와 기보를 출력한다
 
     def __init__(self, use_unicode: bool = True) -> None:
         self.use_unicode = use_unicode and self._supports_unicode()
 
     def _supports_unicode(self) -> bool:
-        # If running in a terminal that cannot print chess glyphs reliably, fall back.
         try:
             "♔".encode("utf-8")
         except UnicodeEncodeError:
@@ -57,7 +56,6 @@ class AsciiRenderer:
         return True
 
     def clear(self) -> None:
-        # ANSI clear screen
         print("\033[2J\033[H", end="")
 
     def render_title_screen(self) -> None:
@@ -95,6 +93,7 @@ class AsciiRenderer:
         prompt_text: str,
         input_buffer: str = "",
     ) -> None:
+        # 현재 상태를 CLI 텍스트로 구성해 출력한다
         self.clear()
         term = shutil.get_terminal_size((100, 30))
         colsplit = int(term.columns * 0.75)
@@ -134,6 +133,7 @@ class AsciiRenderer:
         print("\n".join(info_lines))
 
     def _board_to_text(self, board: "chess.Board") -> str:
+        # 보드 객체를 ASCII 행렬 문자열로 변환한다
         if chess is None:
             raise RuntimeError("python-chess is required for board rendering.")
 
@@ -159,6 +159,7 @@ class AsciiRenderer:
         return mapping.get(symbol, symbol)
 
     def _moves_to_text(self, moves: Iterable[str]) -> str:
+        # 기보 목록을 좌우 짝수 형태의 문자열로 만든다
         lines = ["Moves (White/Black):"]
         move_pairs = []
         moves_list = list(moves)
