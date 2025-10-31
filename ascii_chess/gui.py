@@ -38,6 +38,8 @@ class ChessGUI:
         self.use_unicode = use_unicode
         self.board = chess.Board()
         self.move_history: List[str] = []
+        self.undo_stack: List[str] = [self.board.fen()]  # FEN 히스토리
+        self.redo_stack: List[str] = []  # REDO용 FEN 스택
         self._awaiting_ai = False
         self._resigned = False
         self._forfeited = False
@@ -52,6 +54,7 @@ class ChessGUI:
         self._build_widgets()
         self._configure_geometry()
         self._bring_to_front()
+        self._setup_keybindings()
         self._show_intro_screen()
 
     def _build_widgets(self) -> None:
@@ -71,7 +74,7 @@ class ChessGUI:
             bd=0,
             highlightthickness=0,
         )
-        self.board_text.grid(row=0, column=0, rowspan=2, sticky="nw")
+        self.board_text.grid(row=0, column=0, rowspan=2, sticky="nsew")
 
         moves_frame = tk.Frame(main_frame)
         moves_frame.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
@@ -86,6 +89,7 @@ class ChessGUI:
             height=18,
             font=MOVE_FONT,
             state=tk.DISABLED,
+            wrap=tk.NONE,
         )
         self.moves_text.pack(fill=tk.BOTH, expand=True)
 
@@ -109,18 +113,29 @@ class ChessGUI:
         self.submit_button = tk.Button(entry_row, text="Submit", command=self._on_submit)
         self.submit_button.pack(side=tk.LEFT, padx=(6, 0))
 
+        # UNDO/REDO 버튼 추가
+        button_row = tk.Frame(input_frame)
+        button_row.pack(fill=tk.X, pady=(8, 0))
+        
+        self.undo_button = tk.Button(button_row, text="Undo (Ctrl+Z)", command=self._on_undo)
+        self.undo_button.pack(side=tk.LEFT, padx=(0, 6))
+        
+        self.redo_button = tk.Button(button_row, text="Redo (Ctrl+Y)", command=self._on_redo)
+        self.redo_button.pack(side=tk.LEFT)
+
         help_label = tk.Label(
             input_frame,
-            text="Commands: ff, help, quit",
+            text="Commands: ff, help, quit, undo, redo",
             font=STATUS_FONT,
             fg="#777",
         )
         help_label.pack(anchor="w", pady=(8, 0))
 
-        main_frame.columnconfigure(0, weight=0)
-        main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(0, weight=0)
-        main_frame.rowconfigure(1, weight=1)
+        # Grid weight 설정: 보드는 고정, 우측 패널은 확장 가능
+        main_frame.columnconfigure(0, weight=3)  # 보드 영역 (더 큰 비중)
+        main_frame.columnconfigure(1, weight=1)  # 우측 패널
+        main_frame.rowconfigure(0, weight=3)     # 기보 영역 (더 큰 비중)
+        main_frame.rowconfigure(1, weight=1)     # 입력 영역
 
     def _show_intro_screen(self) -> None:
         # 인트로 화면을 표시하고 엔터 입력을 기다린다
@@ -178,6 +193,11 @@ class ChessGUI:
         self._blink()
 
         self.root.bind("<Return>", self._start_game_from_intro)
+    
+    def _setup_keybindings(self) -> None:
+        # UNDO/REDO 단축키 설정
+        self.root.bind("<Control-z>", lambda e: self._on_undo())
+        self.root.bind("<Control-y>", lambda e: self._on_redo())
 
     def _blink(self) -> None:
         if not hasattr(self, "blink_label"):
@@ -261,9 +281,16 @@ class ChessGUI:
             messagebox.showinfo(
                 "Help",
                 "Enter chess moves in SAN (e.g. Nf3, O-O, cxd4).\n"
-                "Commands:\n  ff     - forfeit the game\n  quit   - exit the application",
+                "Commands:\n  ff     - forfeit the game\n  quit   - exit the application\n"
+                "  undo   - undo last move (Ctrl+Z)\n  redo   - redo move (Ctrl+Y)",
                 parent=self.root,
             )
+            return
+        if lowered == "undo":
+            self._on_undo()
+            return
+        if lowered == "redo":
+            self._on_redo()
             return
         if lowered == "quit":
             self._stop_enemy_blink()
@@ -294,6 +321,10 @@ class ChessGUI:
             self.status_label.config(text=f"Illegal move: {user_input}")
             return
 
+        # 플레이어 수를 두기 전 상태 저장
+        self.undo_stack.append(self.board.fen())
+        self.redo_stack.clear()  # 새 수를 두면 REDO 스택 초기화
+        
         self.board.push(move)
         self.move_history.append(san)
         self.status_label.config(text="Enemy is thinking...")
@@ -318,6 +349,10 @@ class ChessGUI:
             return
 
         self._ai_job = None
+        
+        # AI 수를 두기 전 상태 저장
+        self.undo_stack.append(self.board.fen())
+        
         san = self.board.san(ai_move)
         self.board.push(ai_move)
         self.move_history.append(san)
@@ -381,6 +416,9 @@ class ChessGUI:
         # 새 대국을 시작하기 위한 상태 초기화
         self.board = chess.Board()
         self.move_history.clear()
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+        self.undo_stack.append(self.board.fen())  # 초기 상태 저장
         self._stop_enemy_blink()
         self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
         self.status_label.config(text="New game! Player to move.")
@@ -538,15 +576,37 @@ class ChessGUI:
             pass
 
     def _configure_geometry(self) -> None:
-        # 고정 창 크기를 계산하기 위한 기준 값
+        # 화면 크기 감지
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        
+        # 기본 창 크기 계산
         board_width = 32 * 18
         board_height = 12 * 36
         moves_width = 150
         padding = 24
-        total_w = board_width + moves_width + padding
-        total_h = board_height + padding
-        self.root.geometry(f"{total_w}x{total_h}")
-        self.root.resizable(False, False)
+        default_w = board_width + moves_width + padding
+        default_h = board_height + padding
+        
+        # 화면 크기의 80%를 최대로 설정
+        max_w = int(screen_width * 0.8)
+        max_h = int(screen_height * 0.8)
+        
+        # 화면에 맞춰 크기 조정
+        window_w = min(default_w, max_w)
+        window_h = min(default_h, max_h)
+        
+        # 최소 크기 설정 (UI가 깨지지 않도록)
+        min_w = 700
+        min_h = 500
+        
+        # 창을 화면 중앙에 배치
+        x = (screen_width - window_w) // 2
+        y = (screen_height - window_h) // 2
+        
+        self.root.geometry(f"{window_w}x{window_h}+{x}+{y}")
+        self.root.minsize(min_w, min_h)
+        self.root.resizable(True, True)  # 크기 조절 가능하게 변경
 
     def _bring_to_front(self) -> None:
         try:
@@ -568,3 +628,82 @@ class ChessGUI:
                 except tk.TclError:
                     pass
                 self._focus_binding = None
+    
+    def _on_undo(self) -> None:
+        # 마지막 플레이어 수와 AI 수를 되돌린다 (2수)
+        if self._awaiting_ai:
+            self.status_label.config(text="Cannot undo while Enemy is thinking.")
+            return
+        
+        if len(self.undo_stack) < 3:  # 초기 상태 + 플레이어 수 + AI 수
+            self.status_label.config(text="Nothing to undo.")
+            return
+        
+        # 현재 상태를 REDO 스택에 저장 (AI 수)
+        if self.move_history:
+            self.redo_stack.append(self.move_history[-1])
+        
+        # AI 수 되돌리기
+        self.board.pop()
+        self.undo_stack.pop()
+        if self.move_history:
+            self.move_history.pop()
+        
+        # 플레이어 수도 REDO 스택에 저장
+        if self.move_history:
+            self.redo_stack.append(self.move_history[-1])
+        
+        # 플레이어 수 되돌리기
+        self.board.pop()
+        self.undo_stack.pop()
+        if self.move_history:
+            self.move_history.pop()
+        
+        self._stop_enemy_blink()
+        self.status_label.config(text="Undone. Player to move.")
+        self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
+        self._render()
+    
+    def _on_redo(self) -> None:
+        # REDO 스택에서 상태를 복원한다 (2수)
+        if self._awaiting_ai:
+            self.status_label.config(text="Cannot redo while Enemy is thinking.")
+            return
+        
+        if len(self.redo_stack) < 2:  # 플레이어 수 + AI 수
+            self.status_label.config(text="Nothing to redo.")
+            return
+        
+        # 플레이어 수 REDO
+        player_move_san = self.redo_stack.pop()
+        try:
+            player_move = self.board.parse_san(player_move_san)
+            self.undo_stack.append(self.board.fen())
+            self.board.push(player_move)
+            self.move_history.append(player_move_san)
+        except ValueError:
+            self.redo_stack.append(player_move_san)
+            self.status_label.config(text="Redo failed.")
+            return
+        
+        # AI 수 REDO
+        ai_move_san = self.redo_stack.pop()
+        try:
+            ai_move = self.board.parse_san(ai_move_san)
+            self.undo_stack.append(self.board.fen())
+            self.board.push(ai_move)
+            self.move_history.append(ai_move_san)
+        except ValueError:
+            # AI 수 복원 실패시 플레이어 수도 되돌림
+            self.board.pop()
+            self.undo_stack.pop()
+            self.move_history.pop()
+            self.redo_stack.append(player_move_san)
+            self.redo_stack.append(ai_move_san)
+            self.status_label.config(text="Redo failed.")
+            return
+        
+        self._stop_enemy_blink()
+        self.status_label.config(text="Redone. Player to move.")
+        self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
+        self._render()
