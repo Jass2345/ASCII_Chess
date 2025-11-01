@@ -20,7 +20,7 @@ FONT_DIR = Path(__file__).resolve().parent / "fonts"
 FONT_PATH = FONT_DIR / "menlo-regular.ttf"
 
 # 고정폭 폰트 사용으로 체크판 자간 정렬
-BOARD_FONT = (MENLO_FONT_NAME, 28)
+BOARD_FONT = (MENLO_FONT_NAME, 32)
 MOVE_FONT = (MENLO_FONT_NAME, 12)
 STATUS_FONT = (MENLO_FONT_NAME, 11)
 PROMPT_FONT = (MENLO_FONT_NAME, 11)
@@ -140,8 +140,8 @@ class ChessGUI:
 
         self.board_text = tk.Text(
             board_container,
-            width=32,
-            height=14,
+            width=34,
+            height=15,
             font=self.board_font,
             bg="#111",
             fg="#eee",
@@ -149,8 +149,8 @@ class ChessGUI:
             bd=0,
             highlightthickness=0,
             wrap=tk.NONE,
-            spacing1=4,
-            spacing3=4,
+            spacing1=12,
+            spacing3=12,
             yscrollcommand=board_scroll_y.set,
             xscrollcommand=board_scroll_x.set,
         )
@@ -935,7 +935,7 @@ class ChessGUI:
             return
 
         for rank_offset in range(8):
-            line_number = rank_offset + 2  # 1-based line index (1=header)
+            line_number = rank_offset + 2  # header occupies line 1
             rank_idx = 7 - rank_offset
             for file_idx in range(8):
                 start_col = EDGE_LABEL_WIDTH + file_idx * CELL_WIDTH
@@ -972,7 +972,7 @@ class ChessGUI:
     def _board_to_text(self, board: "chess.Board") -> str:
         # 보드 상태를 텍스트 행렬로 변환한다
         header_cells = [chr(ord("a") + file).center(CELL_WIDTH) for file in range(8)]
-        header = " " * EDGE_LABEL_WIDTH + "".join(header_cells) + " " * EDGE_LABEL_WIDTH
+        header = " " * EDGE_LABEL_WIDTH + "".join(header_cells)
         lines = [header]
         for rank in range(7, -1, -1):
             square_chunks: List[str] = []
@@ -988,10 +988,9 @@ class ChessGUI:
                     symbol = self._piece_symbol(piece.symbol())
                     chunk = symbol.center(CELL_WIDTH)
                 square_chunks.append(chunk)
-            row_label = str(rank + 1).center(EDGE_LABEL_WIDTH)
-            line = f"{row_label}{''.join(square_chunks)}{row_label}"
+            row_label = str(rank + 1).rjust(EDGE_LABEL_WIDTH)
+            line = f"{row_label}{''.join(square_chunks)}"
             lines.append(line)
-        lines.append(header)
         return "\n".join(lines)
 
     def _piece_symbol(self, symbol: str) -> str:
