@@ -149,8 +149,8 @@ class ChessGUI:
             bd=0,
             highlightthickness=0,
             wrap=tk.NONE,
-            spacing1=12,
-            spacing3=12,
+            spacing1=10,
+            spacing3=10,
             yscrollcommand=board_scroll_y.set,
             xscrollcommand=board_scroll_x.set,
         )
@@ -931,7 +931,7 @@ class ChessGUI:
         for tag in ("square_light", "square_dark", "piece_white", "piece_black"):
             self.board_text.tag_remove(tag, "1.0", tk.END)
 
-        if len(board_lines) < 10:
+        if len(board_lines) < 9:
             return
 
         for rank_offset in range(8):
@@ -943,9 +943,9 @@ class ChessGUI:
                 start_index = f"{line_number}.{start_col}"
                 end_index = f"{line_number}.{end_col}"
                 square_tag = "square_light" if (file_idx + rank_idx) % 2 else "square_dark"
-                self.board_text.tag_add(square_tag, start_index, end_index)
                 square = chess.square(file_idx, rank_idx)
                 piece = self.board.piece_at(square)
+                self.board_text.tag_add(square_tag, start_index, end_index)
                 blink_hidden = (
                     self._enemy_highlight_square == square and not self._enemy_blink_visible
                 )
