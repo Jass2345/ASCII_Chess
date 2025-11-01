@@ -93,6 +93,13 @@ class ChessGUI:
         self._focus_binding: Optional[str] = None
         self._closing = False
 
+        # 타이머 상태
+        self.time_mode: Optional[int] = None  # 1=10분, 2=3분, 3=무제한
+        self.initial_seconds: int = 0
+        self.player_time_left: int = 0
+        self.enemy_time_left: int = 0
+        self._timer_job: Optional[int] = None
+
         self.board_themes: List[BoardTheme] = list(DEFAULT_BOARD_THEMES)
         self.piece_color_themes: List[PieceColorTheme] = list(DEFAULT_PIECE_COLORS)
         self.selected_board_theme_index = 0
@@ -216,6 +223,15 @@ class ChessGUI:
 
         self.enemy_label = tk.Label(input_frame, text="Enemy: Ready", font=STATUS_FONT, fg=ENEMY_BASE_COLOR)
         self.enemy_label.pack(anchor="w", pady=(4, 8))
+
+        # 타이머 라벨 (기보 입력 위에 작게 표시)
+        timers_row = tk.Frame(input_frame)
+        timers_row.pack(fill=tk.X, pady=(0, 4))
+        self.timers_row = timers_row
+        self.player_timer_label = tk.Label(timers_row, text="You: ∞", font=STATUS_FONT, fg="#999")
+        self.player_timer_label.pack(side=tk.LEFT)
+        self.enemy_timer_label = tk.Label(timers_row, text="Enemy: ∞", font=STATUS_FONT, fg="#999")
+        self.enemy_timer_label.pack(side=tk.RIGHT)
 
         entry_row = tk.Frame(input_frame)
         entry_row.pack(fill=tk.X)
@@ -701,16 +717,40 @@ class ChessGUI:
         rating = max(self.engine_config.min_rating, min(rating, self.engine_config.max_rating))
         self.move_entry.delete(0, tk.END)
         self.ai.set_rating(rating)
-        self.status_label.config(text=f"Enemy rating: {rating} Elo. Player to move.")
-        self._stop_enemy_blink()
+        # 시간 모드 선택 단계로 이동
+        self.mode = "time_select"
+        self.status_label.config(text="시간 모드를 선택하세요: 1) 10분  2) 3분  3) 무제한")
         self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
+        self.move_entry.insert(0, "1")
+        self.move_entry.selection_range(0, tk.END)
+        self.move_entry.focus_set()
+        self.move_entry.bind("<Return>", self._on_submit_time_mode)
+        self.submit_button.configure(command=self._on_submit_time_mode)
+        self._render()
+
+    def _on_submit_time_mode(self, event: tk.Event | None = None) -> None:
+        choice_text = self.move_entry.get().strip()
+        try:
+            choice = int(choice_text)
+        except ValueError:
+            self.status_label.config(text="1, 2, 3 중 하나를 입력하세요. (1=10분, 2=3분, 3=무제한)")
+            self.move_entry.selection_range(0, tk.END)
+            return
+        if choice not in (1, 2, 3):
+            self.status_label.config(text="1, 2, 3 중 하나를 입력하세요. (1=10분, 2=3분, 3=무제한)")
+            self.move_entry.selection_range(0, tk.END)
+            return
+        self.move_entry.delete(0, tk.END)
+        self._apply_time_mode(choice)
         self._resigned = False
         self._forfeited = False
         self._awaiting_ai = False
         self.mode = "game"
+        self.status_label.config(text="Enemy rating set. Player to move.")
         self.move_entry.bind("<Return>", self._on_submit)
         self.submit_button.configure(command=self._on_submit)
         self._render()
+        self._start_timer_tick()
 
     def _on_submit(self, event: Optional[tk.Event] = None) -> None:
         # 현재 입력 값에 따라 명령 또는 수를 처리한다
@@ -790,12 +830,13 @@ class ChessGUI:
             return
 
         self._awaiting_ai = True
-        self._ai_job = self.root.after(100, self._play_ai_move)
+        self._schedule_ai_move()
 
     def _play_ai_move(self) -> None:
         # Enemy가 수를 계산해 둔 뒤 화면과 상태를 갱신한다
         try:
-            ai_move = self.ai.choose_move(self.board)
+            # 엔진 호출 자체는 짧게, 전체 지연은 스케줄러에서 처리
+            ai_move = self.ai.choose_move(self.board, think_time=0.05)
         except Exception as exc:  # pragma: no cover - engine errors are unexpected
             messagebox.showerror("Engine error", str(exc), parent=self.root)
             self._awaiting_ai = False
@@ -816,8 +857,50 @@ class ChessGUI:
         if self.board.is_game_over(claim_draw=True):
             self._announce_result()
 
+    def _schedule_ai_move(self) -> None:
+        # 현재 포지션 난이도를 추정하여 가변 지연 후 AI 수를 두도록 예약한다
+        delay_s = self._estimate_position_difficulty() * self._elo_delay_scale()
+        delay_ms = max(50, int(min(4.0, delay_s) * 1000))
+        if self._ai_job is not None:
+            try:
+                self.root.after_cancel(self._ai_job)
+            except tk.TclError:
+                pass
+            self._ai_job = None
+        self._ai_job = self.root.after(delay_ms, self._play_ai_move)
+
+    def _estimate_position_difficulty(self) -> float:
+        # 간단한 휴리스틱: 합법 수 개수와 체크 여부 기반, 약간의 랜덤성
+        try:
+            import random
+            legal_count = sum(1 for _ in self.board.legal_moves)
+            base = 0.6 if legal_count <= 10 else (1.2 if legal_count <= 25 else 2.0)
+            if self.board.is_check():
+                base += 0.5
+            jitter = random.uniform(-0.2, 0.3)
+            return max(0.2, base + jitter)
+        except Exception:
+            return 0.8
+
+    def _elo_delay_scale(self) -> float:
+        # Elo가 낮을수록 더 오래 생각(스케일 > 1), 높을수록 더 빨리(스케일 < 1)
+        try:
+            r = getattr(self.ai, "rating", 1500)
+            rmin = getattr(self.engine_config, "min_rating", 1350)
+            rmax = getattr(self.engine_config, "max_rating", 2850)
+            if rmax <= rmin:
+                return 1.0
+            t = (r - rmin) / (rmax - rmin)
+            t = max(0.0, min(1.0, t))
+            slow, fast = 1.8, 0.6  # 낮은 Elo일수록 1.8배, 높은 Elo일수록 0.6배
+            scale = slow + (fast - slow) * t
+            return max(0.5, min(2.0, scale))
+        except Exception:
+            return 1.0
+
     def _handle_forced_outcome(self, outcome: str) -> None:
         # 개발자 테스트 명령으로 강제 종료 시 메시지를 출력한다
+        self._cancel_timer()
         self._stop_enemy_blink()
         mapping = {
             "win": ("Player wins!", "Enemy: Defeated"),
@@ -835,6 +918,7 @@ class ChessGUI:
 
     def _announce_result(self) -> None:
         # 실제 대국 결과를 팝업으로 알리고 재도전을 묻는다
+        self._cancel_timer()
         outcome = self.board.outcome(claim_draw=True)
         if outcome is None:
             result_text = "Game ended prematurely."
@@ -885,6 +969,10 @@ class ChessGUI:
                 pass
             self._ai_job = None
         self._render()
+        # 선택된 시간 모드로 타이머 초기화 및 시작
+        if self.time_mode is not None:
+            self._apply_time_mode(self.time_mode)
+            self._start_timer_tick()
 
     def _render(self) -> None:
         # 보드와 기보 텍스트를 최신 상태로 갱신한다
@@ -1011,6 +1099,7 @@ class ChessGUI:
 
     def _on_close(self) -> None:
         self._stop_enemy_blink()
+        self._cancel_timer()
         self.ai.close()
         self.root.destroy()
 
@@ -1065,6 +1154,7 @@ class ChessGUI:
             return
         self._closing = True
         self._stop_enemy_blink()
+        self._cancel_timer()
         if self._ai_job is not None:
             try:
                 self.root.after_cancel(self._ai_job)
@@ -1084,6 +1174,94 @@ class ChessGUI:
             self.root.destroy()
         except tk.TclError:
             pass
+
+    # ===== 타이머 로직 =====
+    def _apply_time_mode(self, mode: int) -> None:
+        self.time_mode = mode
+        if mode == 1:
+            self.initial_seconds = 10 * 60
+        elif mode == 2:
+            self.initial_seconds = 3 * 60
+        else:
+            self.initial_seconds = 0  # 무제한
+
+        if self.initial_seconds > 0:
+            self.player_time_left = self.initial_seconds
+            self.enemy_time_left = self.initial_seconds
+            self.player_timer_label.config(text=f"You: {self._fmt_time(self.player_time_left)}")
+            self.enemy_timer_label.config(text=f"Enemy: {self._fmt_time(self.enemy_time_left)}")
+        else:
+            self.player_time_left = 0
+            self.enemy_time_left = 0
+            self.player_timer_label.config(text="You: ∞")
+            self.enemy_timer_label.config(text="Enemy: ∞")
+
+    def _fmt_time(self, seconds: int) -> str:
+        m = max(0, seconds) // 60
+        s = max(0, seconds) % 60
+        return f"{m:02d}:{s:02d}"
+
+    def _start_timer_tick(self) -> None:
+        self._cancel_timer()
+        if self.initial_seconds == 0:
+            return  # 무제한
+        self._timer_job = self.root.after(1000, self._timer_tick)
+
+    def _timer_tick(self) -> None:
+        self._timer_job = None
+        if self.mode != "game":
+            return
+        if self.initial_seconds == 0:
+            return
+        # 누구 차례인지에 따라 감소
+        if self._awaiting_ai:
+            self.enemy_time_left -= 1
+            if self.enemy_time_left <= 0:
+                self.enemy_time_left = 0
+                self.enemy_timer_label.config(text=f"Enemy: {self._fmt_time(self.enemy_time_left)}")
+                self.status_label.config(text="Enemy flag fell. Player wins!")
+                messagebox.showinfo("Time over", "Enemy flag fell. Player wins!", parent=self.root)
+                # 예약된 AI 동작이 있으면 취소
+                if self._ai_job is not None:
+                    try:
+                        self.root.after_cancel(self._ai_job)
+                    except tk.TclError:
+                        pass
+                    self._ai_job = None
+                self._cancel_timer()
+                self._ask_play_again()
+                return
+        else:
+            self.player_time_left -= 1
+            if self.player_time_left <= 0:
+                self.player_time_left = 0
+                self.player_timer_label.config(text=f"You: {self._fmt_time(self.player_time_left)}")
+                self.status_label.config(text="Player flag fell. Enemy wins!")
+                messagebox.showinfo("Time over", "Player flag fell. Enemy wins!", parent=self.root)
+                # 예약된 AI 동작이 있으면 취소
+                if self._ai_job is not None:
+                    try:
+                        self.root.after_cancel(self._ai_job)
+                    except tk.TclError:
+                        pass
+                    self._ai_job = None
+                self._cancel_timer()
+                self._ask_play_again()
+                return
+
+        # 라벨 갱신
+        self.player_timer_label.config(text=f"You: {self._fmt_time(self.player_time_left)}")
+        self.enemy_timer_label.config(text=f"Enemy: {self._fmt_time(self.enemy_time_left)}")
+        # 다음 틱 예약
+        self._timer_job = self.root.after(1000, self._timer_tick)
+
+    def _cancel_timer(self) -> None:
+        if self._timer_job is not None:
+            try:
+                self.root.after_cancel(self._timer_job)
+            except tk.TclError:
+                pass
+            self._timer_job = None
 
     def _configure_geometry(self) -> None:
         # 기본 창 크기를 계산하고 최소 크기를 설정한다
