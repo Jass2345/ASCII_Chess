@@ -109,6 +109,12 @@ class ChessGUI:
             ("piece_color", "Piece Color"),
         ]
 
+        self.intro_options = ["Game Start", "Theme Settings"]
+        self._intro_selection = 0
+        self._intro_blink_state = True
+        self._intro_blink_job: Optional[int] = None
+        self.intro_option_labels: List[tk.Label] = []
+
         self._ensure_menlo_font()
         self._apply_global_font()
         self.board_font = tkfont.Font(family=BOARD_FONT[0], size=BOARD_FONT[1])
@@ -134,8 +140,8 @@ class ChessGUI:
 
         self.board_text = tk.Text(
             board_container,
-            width=26,
-            height=12,
+            width=32,
+            height=14,
             font=self.board_font,
             bg="#111",
             fg="#eee",
@@ -143,6 +149,8 @@ class ChessGUI:
             bd=0,
             highlightthickness=0,
             wrap=tk.NONE,
+            spacing1=4,
+            spacing3=4,
             yscrollcommand=board_scroll_y.set,
             xscrollcommand=board_scroll_x.set,
         )
@@ -283,10 +291,17 @@ class ChessGUI:
     def _setup_keybindings(self) -> None:
         self.root.bind("<Control-z>", lambda e: self._on_undo())
         self.root.bind("<Control-y>", lambda e: self._on_redo())
+        self.root.bind("<Escape>", self._handle_escape)
 
     def _show_intro_screen(self) -> None:
         # 인트로 화면을 표시하고 엔터 입력을 기다린다
         self.mode = "intro"
+        if hasattr(self, "move_entry"):
+            try:
+                self.move_entry.configure(state=tk.DISABLED)
+                self.submit_button.configure(state=tk.DISABLED)
+            except tk.TclError:
+                pass
         self.main_frame.pack_forget()
 
         self.intro_frame = tk.Frame(self.root, bg="#111", padx=40, pady=40)
@@ -329,40 +344,106 @@ class ChessGUI:
         )
         title_label.pack(pady=(0, 12))
 
-        self.blink_label = tk.Label(
+        hint_label = tk.Label(
             self.intro_frame,
-            text="< Press Enter to start >",
-            font=("Menlo", 16),
-            bg="#111",
-            fg="#eee",
-        )
-        self.blink_label.pack(pady=(0, 8))
-        self._blink_state = True
-        self._blink()
-
-        self.esc_hint_label = tk.Label(
-            self.intro_frame,
-            text="< Press Esc for theme settings >",
-            font=("Menlo", 14),
+            text="Use ↑ / ↓ to choose an option, then press Enter",
+            font=("Menlo", 12),
             bg="#111",
             fg="#bbb",
         )
-        self.esc_hint_label.pack(pady=(0, 16))
+        hint_label.pack(pady=(0, 20))
 
-        self.root.bind("<Return>", self._start_game_from_intro)
-        self.root.bind("<Escape>", self._handle_escape)
+        self._intro_selection = 0
+        self._intro_blink_state = True
+        self.intro_option_labels = []
 
-    def _blink(self) -> None:
-        if not hasattr(self, "blink_label"):
+        self.intro_menu_frame = tk.Frame(self.intro_frame, bg="#111")
+        self.intro_menu_frame.pack()
+        for option in self.intro_options:
+            label = tk.Label(
+                self.intro_menu_frame,
+                text=option,
+                font=("Menlo", 18, "bold"),
+                bg="#111",
+                fg="#bbb",
+            )
+            label.pack(pady=6)
+            self.intro_option_labels.append(label)
+
+        self._render_intro_options()
+        self._intro_blink_job = self.root.after(500, self._intro_blink)
+
+        self.root.bind("<Up>", self._intro_move_up)
+        self.root.bind("<Down>", self._intro_move_down)
+        self.root.bind("<Return>", self._intro_activate)
+        self.intro_frame.focus_set()
+
+    def _render_intro_options(self) -> None:
+        if not self.intro_option_labels:
             return
-        self._blink_state = not self._blink_state
-        color = "#eee" if self._blink_state else "#555"
-        self.blink_label.config(fg=color)
-        self.root.after(500, self._blink)
+        for idx, label in enumerate(self.intro_option_labels):
+            text = self.intro_options[idx]
+            if idx == self._intro_selection:
+                display = f"> {text} <"
+                color = "#ffd700" if self._intro_blink_state else "#444444"
+            else:
+                display = f"  {text}  "
+                color = "#bbbbbb"
+            label.config(text=display, fg=color)
+
+    def _intro_blink(self) -> None:
+        if self.mode != "intro" or not self.intro_option_labels:
+            self._intro_blink_job = None
+            return
+        self._intro_blink_state = not self._intro_blink_state
+        self._render_intro_options()
+        self._intro_blink_job = self.root.after(500, self._intro_blink)
+
+    def _intro_move_up(self, event: tk.Event | None = None):
+        if self.mode != "intro":
+            return "break"
+        self._change_intro_selection(-1)
+        return "break"
+
+    def _intro_move_down(self, event: tk.Event | None = None):
+        if self.mode != "intro":
+            return "break"
+        self._change_intro_selection(1)
+        return "break"
+
+    def _change_intro_selection(self, delta: int) -> None:
+        option_count = len(self.intro_options)
+        if option_count == 0:
+            return
+        self._intro_selection = (self._intro_selection + delta) % option_count
+        self._intro_blink_state = True
+        self._render_intro_options()
+
+    def _intro_activate(self, event: tk.Event | None = None):
+        if self.mode != "intro":
+            return "break"
+        self._activate_intro_option()
+        return "break"
+
+    def _activate_intro_option(self) -> None:
+        if self._intro_selection == 0:
+            self._start_game_from_intro()
+        else:
+            self._enter_theme_settings()
+
+    def _teardown_intro_bindings(self) -> None:
+        for seq in ("<Up>", "<Down>", "<Return>"):
+            self.root.unbind(seq)
+        if self._intro_blink_job is not None:
+            try:
+                self.root.after_cancel(self._intro_blink_job)
+            except tk.TclError:
+                pass
+            self._intro_blink_job = None
+        self.intro_option_labels = []
 
     def _handle_escape(self, event: tk.Event | None = None):
         if self.mode == "intro":
-            self._enter_theme_settings()
             return "break"
         if self.mode == "theme_detail":
             self._exit_theme_detail()
@@ -375,15 +456,14 @@ class ChessGUI:
     def _enter_theme_settings(self) -> None:
         if self.mode in {"theme_menu", "theme_detail"}:
             return
+        if self.mode == "intro":
+            self._teardown_intro_bindings()
         if hasattr(self, "intro_frame"):
-            self.root.unbind("<Return>")
             try:
                 self.intro_frame.destroy()
             except tk.TclError:
                 pass
-            for attr in ("intro_frame", "blink_label", "esc_hint_label"):
-                if hasattr(self, attr):
-                    delattr(self, attr)
+            del self.intro_frame
         self._stop_enemy_blink()
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         self.mode = "theme_menu"
@@ -586,17 +666,16 @@ class ChessGUI:
 
     def _start_game_from_intro(self, event: tk.Event | None = None) -> None:
         # 인트로 종료 후 기본 판과 입력 상태를 세팅한다
-        if not hasattr(self, "intro_frame"):
+        if self.mode != "intro" or not hasattr(self, "intro_frame"):
             return
-        self.root.unbind("<Return>")
+        self._teardown_intro_bindings()
         self.intro_frame.destroy()
         del self.intro_frame
-        del self.blink_label
-        if hasattr(self, "esc_hint_label"):
-            del self.esc_hint_label
         self._stop_enemy_blink()
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         self.mode = "game_setup"
+        self.move_entry.configure(state=tk.NORMAL)
+        self.submit_button.configure(state=tk.NORMAL)
         self.status_label.config(text="Enter Enemy Elo (1350-2850, default 1500):")
         self.move_entry.delete(0, tk.END)
         self.move_entry.insert(0, "1500")
@@ -604,13 +683,9 @@ class ChessGUI:
         self.move_entry.focus_set()
         self.move_entry.bind("<Return>", self._on_submit_with_rating)
         self.submit_button.configure(command=self._on_submit_with_rating)
-        board_text = self._board_to_text(self.board)
-        self.board_text.config(state=tk.NORMAL)
-        self.board_text.delete("1.0", tk.END)
-        self.board_text.insert(tk.END, board_text)
-        self.board_text.config(state=tk.DISABLED)
         self.undo_stack = [self.board.fen()]
         self.redo_stack.clear()
+        self._render()
 
     def _on_submit_with_rating(self, event: tk.Event | None = None) -> None:
         text = self.move_entry.get().strip()
@@ -908,10 +983,11 @@ class ChessGUI:
                     self._enemy_highlight_square == square and not self._enemy_blink_visible
                 )
                 if piece is None or blink_hidden:
-                    symbol = LIGHT_SQUARE if (rank + file) % 2 else DARK_SQUARE
+                    chunk = " " * CELL_WIDTH
                 else:
                     symbol = self._piece_symbol(piece.symbol())
-                square_chunks.append(symbol.center(CELL_WIDTH))
+                    chunk = symbol.center(CELL_WIDTH)
+                square_chunks.append(chunk)
             row_label = str(rank + 1).center(EDGE_LABEL_WIDTH)
             line = f"{row_label}{''.join(square_chunks)}{row_label}"
             lines.append(line)
