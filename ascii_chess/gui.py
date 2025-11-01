@@ -15,10 +15,11 @@ from .ai import EngineConfig, StockfishAI
 from .renderer import ASCII_PIECES, LIGHT_SQUARE, DARK_SQUARE, UNICODE_PIECES
 
 
-BOARD_FONT = ("Menlo", 32)
-MOVE_FONT = ("Menlo", 14)
-STATUS_FONT = ("Menlo", 12)
-PROMPT_FONT = ("Menlo", 12)
+# 고정폭 폰트 사용으로 체크판 자간 정렬
+BOARD_FONT = ("Courier New", 28)
+MOVE_FONT = ("Courier New", 12)
+STATUS_FONT = ("Arial", 11)
+PROMPT_FONT = ("Courier New", 11)
 
 ENEMY_BASE_COLOR = "#888"
 ENEMY_HIGHLIGHT_COLOR = "#ffcc33"
@@ -58,6 +59,7 @@ DEFAULT_PIECE_COLORS: List[PieceColorTheme] = [
 FALLBACK_BOARD_THEME = DEFAULT_BOARD_THEMES[0]
 FALLBACK_PIECE_COLOR = DEFAULT_PIECE_COLORS[0]
 
+
 class ChessGUI:
     def __init__(self, root: tk.Tk, engine_config: EngineConfig, use_unicode: bool = True) -> None:
         if chess is None:
@@ -73,15 +75,17 @@ class ChessGUI:
         self.use_unicode = use_unicode
         self.board = chess.Board()
         self.move_history: List[str] = []
+        self.undo_stack: List[str] = []
+        self.redo_stack: List[str] = []
         self._awaiting_ai = False
         self._resigned = False
         self._forfeited = False
         self._enemy_highlight_square: Optional[int] = None
         self._enemy_blink_visible = True
-        self._enemy_blink_job: Optional[str] = None
+        self._enemy_blink_job: Optional[int] = None
         self._enemy_blink_remaining = 0
         self._is_rendering = False
-        self._ai_job: Optional[str] = None
+        self._ai_job: Optional[int] = None
         self._focus_binding: Optional[str] = None
         self._closing = False
         self.board_font = tkfont.Font(family=BOARD_FONT[0], size=BOARD_FONT[1])
@@ -105,6 +109,7 @@ class ChessGUI:
         self._build_widgets()
         self._configure_geometry()
         self._bring_to_front()
+        self._setup_keybindings()
         self._show_intro_screen()
 
     def _build_widgets(self) -> None:
@@ -113,35 +118,56 @@ class ChessGUI:
         main_frame.pack(fill=tk.BOTH, expand=True)
         self.main_frame = main_frame
 
+        # 보드 텍스트 위젯 + 스크롤바 구성
+        board_container = tk.Frame(main_frame)
+        board_container.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 12))
+
+        board_scroll_y = tk.Scrollbar(board_container, orient=tk.VERTICAL)
+        board_scroll_x = tk.Scrollbar(board_container, orient=tk.HORIZONTAL)
+
         self.board_text = tk.Text(
-            main_frame,
-            width=2,
-            height=2,
+            board_container,
+            width=26,
+            height=12,
             font=self.board_font,
             bg="#111",
             fg="#eee",
             state=tk.DISABLED,
             bd=0,
             highlightthickness=0,
+            wrap=tk.NONE,
+            yscrollcommand=board_scroll_y.set,
+            xscrollcommand=board_scroll_x.set,
         )
-        self.board_text.grid(row=0, column=0, rowspan=2, sticky="nw")
+        self.board_text.grid(row=0, column=0, sticky="nsew")
+        board_scroll_y.config(command=self.board_text.yview)
+        board_scroll_y.grid(row=0, column=1, sticky="ns")
+        board_scroll_x.config(command=self.board_text.xview)
+        board_scroll_x.grid(row=1, column=0, sticky="ew")
+        board_container.rowconfigure(0, weight=1)
+        board_container.columnconfigure(0, weight=1)
 
         moves_frame = tk.Frame(main_frame)
-        moves_frame.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        moves_frame.grid(row=0, column=1, sticky="nsew")
         self.moves_frame = moves_frame
 
         moves_label = tk.Label(moves_frame, text="Moves", font=STATUS_FONT)
         moves_label.pack(anchor="w")
         self.moves_label = moves_label
 
+        moves_scroll = tk.Scrollbar(moves_frame, orient=tk.VERTICAL)
         self.moves_text = tk.Text(
             moves_frame,
             width=18,
             height=18,
             font=MOVE_FONT,
             state=tk.DISABLED,
+            wrap=tk.NONE,
+            yscrollcommand=moves_scroll.set,
         )
-        self.moves_text.pack(fill=tk.BOTH, expand=True)
+        self.moves_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        moves_scroll.config(command=self.moves_text.yview)
+        moves_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.theme_listbox = tk.Listbox(
             moves_frame,
@@ -167,14 +193,14 @@ class ChessGUI:
         self.theme_info_label.pack_forget()
 
         input_frame = tk.Frame(main_frame)
-        input_frame.grid(row=1, column=1, sticky="nsew", padx=(12, 0), pady=(12, 0))
+        input_frame.grid(row=1, column=1, sticky="nsew", pady=(12, 0))
+        self.input_frame = input_frame
 
         self.status_label = tk.Label(input_frame, text="Welcome, Player!", font=STATUS_FONT)
         self.status_label.pack(anchor="w")
 
         self.enemy_label = tk.Label(input_frame, text="Enemy: Ready", font=STATUS_FONT, fg=ENEMY_BASE_COLOR)
         self.enemy_label.pack(anchor="w", pady=(4, 8))
-        self.input_frame = input_frame
 
         entry_row = tk.Frame(input_frame)
         entry_row.pack(fill=tk.X)
@@ -187,19 +213,32 @@ class ChessGUI:
         self.submit_button = tk.Button(entry_row, text="Submit", command=self._on_submit)
         self.submit_button.pack(side=tk.LEFT, padx=(6, 0))
 
+        # UNDO / REDO 버튼
+        button_row = tk.Frame(input_frame)
+        button_row.pack(fill=tk.X, pady=(8, 0))
+        self.undo_button = tk.Button(button_row, text="Undo (Ctrl+Z)", command=self._on_undo)
+        self.undo_button.pack(side=tk.LEFT, padx=(0, 6))
+        self.redo_button = tk.Button(button_row, text="Redo (Ctrl+Y)", command=self._on_redo)
+        self.redo_button.pack(side=tk.LEFT)
+
         help_label = tk.Label(
             input_frame,
-            text="Commands: ff, help, quit",
+            text="Commands: ff, help, quit, undo, redo",
             font=STATUS_FONT,
             fg="#777",
         )
         help_label.pack(anchor="w", pady=(8, 0))
         self.help_label = help_label
 
-        main_frame.columnconfigure(0, weight=0)
+        # 레이아웃 비중 설정
+        main_frame.columnconfigure(0, weight=3)
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(0, weight=0)
+        main_frame.rowconfigure(0, weight=3)
         main_frame.rowconfigure(1, weight=1)
+
+    def _setup_keybindings(self) -> None:
+        self.root.bind("<Control-z>", lambda e: self._on_undo())
+        self.root.bind("<Control-y>", lambda e: self._on_redo())
 
     def _show_intro_screen(self) -> None:
         # 인트로 화면을 표시하고 엔터 입력을 기다린다
@@ -315,6 +354,8 @@ class ChessGUI:
         self._show_theme_sidebar()
         self.board = chess.Board()
         self.move_history.clear()
+        self.undo_stack.clear()
+        self.redo_stack.clear()
         self.preview_board_theme = None
         self.preview_piece_color_theme = None
         self._show_theme_menu()
@@ -332,6 +373,9 @@ class ChessGUI:
         self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
         self.preview_board_theme = None
         self.preview_piece_color_theme = None
+        self.move_history.clear()
+        self.undo_stack.clear()
+        self.redo_stack.clear()
         self.mode = "intro"
         self.main_frame.pack_forget()
         self._show_intro_screen()
@@ -517,14 +561,12 @@ class ChessGUI:
         self.move_entry.bind("<Return>", self._on_submit_with_rating)
         self.submit_button.configure(command=self._on_submit_with_rating)
         board_text = self._board_to_text(self.board)
-        lines = board_text.splitlines() or [""]
-        max_cols = max(len(line) for line in lines)
         self.board_text.config(state=tk.NORMAL)
         self.board_text.delete("1.0", tk.END)
         self.board_text.insert(tk.END, board_text)
         self.board_text.config(state=tk.DISABLED)
-        self.board_text.configure(width=max_cols, height=len(lines))
-        self.moves_text.configure(height=max(int(len(lines) * 1.5), 6))
+        self.undo_stack = [self.board.fen()]
+        self.redo_stack.clear()
 
     def _on_submit_with_rating(self, event: tk.Event | None = None) -> None:
         text = self.move_entry.get().strip()
@@ -574,9 +616,18 @@ class ChessGUI:
             messagebox.showinfo(
                 "Help",
                 "Enter chess moves in SAN (e.g. Nf3, O-O, cxd4).\n"
-                "Commands:\n  ff     - forfeit the game\n  quit   - exit the application",
+                "Commands:\n  ff     - forfeit the game\n"
+                "  quit   - exit the application\n"
+                "  undo   - undo last pair of moves (Ctrl+Z)\n"
+                "  redo   - redo last pair of moves (Ctrl+Y)",
                 parent=self.root,
             )
+            return
+        if lowered == "undo":
+            self._on_undo()
+            return
+        if lowered == "redo":
+            self._on_redo()
             return
         if lowered == "quit":
             self._stop_enemy_blink()
@@ -609,6 +660,8 @@ class ChessGUI:
 
         self.board.push(move)
         self.move_history.append(san)
+        self.undo_stack.append(self.board.fen())
+        self.redo_stack.clear()
         self.status_label.config(text="Enemy is thinking...")
         self.enemy_label.config(text="Enemy: Calculating...", fg=ENEMY_BASE_COLOR)
         self._render()
@@ -631,9 +684,11 @@ class ChessGUI:
             return
 
         self._ai_job = None
+
         san = self.board.san(ai_move)
         self.board.push(ai_move)
         self.move_history.append(san)
+        self.undo_stack.append(self.board.fen())
         self.enemy_label.config(text=f"Enemy: {san}", fg=ENEMY_BASE_COLOR)
         self.status_label.config(text="Player to move.")
         self._awaiting_ai = False
@@ -694,6 +749,8 @@ class ChessGUI:
         # 새 대국을 시작하기 위한 상태 초기화
         self.board = chess.Board()
         self.move_history.clear()
+        self.undo_stack = [self.board.fen()]
+        self.redo_stack.clear()
         self._stop_enemy_blink()
         self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
         self.status_label.config(text="New game! Player to move.")
@@ -721,20 +778,23 @@ class ChessGUI:
             moves_text = self._moves_to_text(self.move_history)
 
             max_cols = max(len(line) for line in board_lines)
-            self.board_text.config(state=tk.NORMAL)
+            board_line_count = len(board_lines)
+            self.board_text.config(state=tk.NORMAL, width=max_cols, height=board_line_count)
             self.board_text.delete("1.0", tk.END)
             self.board_text.insert(tk.END, board_text)
             self._apply_board_theme_tags(board_lines)
             self.board_text.config(state=tk.DISABLED)
-            board_line_count = len(board_lines)
-            self.board_text.configure(width=max_cols, height=board_line_count)
 
             if self.mode not in {"theme_menu", "theme_detail"}:
                 self.moves_text.config(state=tk.NORMAL)
                 self.moves_text.delete("1.0", tk.END)
                 self.moves_text.insert(tk.END, moves_text)
                 self.moves_text.config(state=tk.DISABLED)
-                self.moves_text.configure(height=max(int(board_line_count * 1.5), 6))
+
+            undo_enabled = len(self.move_history) >= 2 and not self._awaiting_ai
+            redo_enabled = len(self.redo_stack) >= 2 and not self._awaiting_ai
+            self.undo_button.config(state=tk.NORMAL if undo_enabled else tk.DISABLED)
+            self.redo_button.config(state=tk.NORMAL if redo_enabled else tk.DISABLED)
         finally:
             self._is_rendering = False
 
@@ -906,15 +966,20 @@ class ChessGUI:
             pass
 
     def _configure_geometry(self) -> None:
-        # 고정 창 크기를 계산하기 위한 기준 값
+        # 기본 창 크기를 계산하고 최소 크기를 설정한다
         board_width = 32 * 18
         board_height = 12 * 36
         moves_width = 150
         padding = 24
         total_w = board_width + moves_width + padding
         total_h = board_height + padding
+
+        min_w = 700
+        min_h = 500
+
         self.root.geometry(f"{total_w}x{total_h}")
-        self.root.resizable(False, False)
+        self.root.minsize(min_w, min_h)
+        self.root.resizable(True, True)
 
     def _bring_to_front(self) -> None:
         try:
@@ -936,3 +1001,78 @@ class ChessGUI:
                 except tk.TclError:
                     pass
                 self._focus_binding = None
+
+    def _on_undo(self) -> None:
+        if self._awaiting_ai:
+            self.status_label.config(text="Cannot undo while Enemy is thinking.")
+            return
+        if len(self.move_history) < 2:
+            self.status_label.config(text="Nothing to undo.")
+            return
+
+        self._stop_enemy_blink()
+
+        # Undo AI move
+        ai_san = self.move_history.pop()
+        self.redo_stack.append(ai_san)
+        self.board.pop()
+        if self.undo_stack:
+            self.undo_stack.pop()
+
+        # Undo player move
+        player_san = self.move_history.pop()
+        self.redo_stack.append(player_san)
+        self.board.pop()
+        if self.undo_stack:
+            self.undo_stack.pop()
+
+        if not self.undo_stack:
+            self.undo_stack.append(self.board.fen())
+
+        self.status_label.config(text="Undone. Player to move.")
+        self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
+        self._render()
+
+    def _on_redo(self) -> None:
+        if self._awaiting_ai:
+            self.status_label.config(text="Cannot redo while Enemy is thinking.")
+            return
+        if len(self.redo_stack) < 2:
+            self.status_label.config(text="Nothing to redo.")
+            return
+
+        self._stop_enemy_blink()
+
+        # Redo player move (last appended)
+        player_san = self.redo_stack.pop()
+        try:
+            player_move = self.board.parse_san(player_san)
+        except ValueError:
+            self.status_label.config(text="Redo failed.")
+            self.redo_stack.append(player_san)
+            return
+        self.board.push(player_move)
+        self.move_history.append(player_san)
+        self.undo_stack.append(self.board.fen())
+
+        # Redo AI move
+        ai_san = self.redo_stack.pop()
+        try:
+            ai_move = self.board.parse_san(ai_san)
+        except ValueError:
+            self.board.pop()
+            self.move_history.pop()
+            if self.undo_stack:
+                self.undo_stack.pop()
+            self.redo_stack.append(player_san)
+            self.redo_stack.append(ai_san)
+            self.status_label.config(text="Redo failed.")
+            return
+
+        self.board.push(ai_move)
+        self.move_history.append(ai_san)
+        self.undo_stack.append(self.board.fen())
+
+        self.status_label.config(text="Redone. Player to move.")
+        self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
+        self._render()
