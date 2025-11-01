@@ -8,6 +8,9 @@ HNU 2025 ESP course Fall - vibe coding (윤여명, 정재석, 지민우)
 - 인트로 화면에서 Enemy Elo를 입력 후 게임 시작
 - GUI(기본)와 CLI(`--cli`) 모드 지원
 - `ff`(기권), `quit`(즉시 종료) 명령 지원
+- **UNDO/REDO 기능**: 플레이어와 AI의 수를 되돌리고 다시 실행 가능
+- **HINT 기능**: Stockfish 최고 수준의 분석으로 최선의 수를 추천
+- **반응형 GUI**: 화면 크기에 자동으로 맞춰지며 창 크기 조절 가능
 - Enemy가 둔 마지막 기물을 깜빡임 효과로 강조
 
 ## 준비 사항
@@ -39,6 +42,11 @@ python main.py [옵션]
 - 일반 수는 SAN 형식으로 입력 (예: `Nf3`, `O-O`)
 - `ff` : 플레이어 기권
 - `quit` : 즉시 게임 종료
+- `undo` : 마지막 수 되돌리기 (플레이어 + AI 수 2개)
+- `redo` : 되돌린 수 다시 실행
+- `hint` : Stockfish 최고 수준의 최선의 수 추천 (시작/도착 위치 표시)
+- **GUI 단축키**: `Ctrl+Z` (Undo), `Ctrl+Y` (Redo)
+- **GUI 버튼**: 💡 Hint 버튼 클릭으로 힌트 요청 가능
 
 ## 코드 구조
 - `main.py` : CLI/GUI 진입점
