@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import messagebox
@@ -14,11 +15,16 @@ except ImportError:  # pragma: no cover - handled by dependency check in main
 from .ai import EngineConfig, StockfishAI
 from .renderer import ASCII_PIECES, LIGHT_SQUARE, DARK_SQUARE, UNICODE_PIECES
 
+MENLO_FONT_NAME = "Menlo"
+FONT_DIR = Path(__file__).resolve().parent / "fonts"
+FONT_PATH = FONT_DIR / "menlo-regular.ttf"
 
-BOARD_FONT = ("Menlo", 32)
-MOVE_FONT = ("Menlo", 14)
-STATUS_FONT = ("Menlo", 12)
-PROMPT_FONT = ("Menlo", 12)
+
+# 고정폭 폰트 사용으로 체크판 자간 정렬
+BOARD_FONT = (MENLO_FONT_NAME, 28)
+MOVE_FONT = (MENLO_FONT_NAME, 12)
+STATUS_FONT = (MENLO_FONT_NAME, 11)
+PROMPT_FONT = (MENLO_FONT_NAME, 11)
 
 ENEMY_BASE_COLOR = "#888"
 ENEMY_HIGHLIGHT_COLOR = "#ffcc33"
@@ -73,6 +79,8 @@ class ChessGUI:
         self.use_unicode = use_unicode
         self.board = chess.Board()
         self.move_history: List[str] = []
+        self.undo_stack: List[str] = [self.board.fen()]
+        self.redo_stack: List[str] = []
         self._awaiting_ai = False
         self._resigned = False
         self._forfeited = False
@@ -84,7 +92,6 @@ class ChessGUI:
         self._ai_job: Optional[str] = None
         self._focus_binding: Optional[str] = None
         self._closing = False
-        self.board_font = tkfont.Font(family=BOARD_FONT[0], size=BOARD_FONT[1])
 
         self.board_themes: List[BoardTheme] = list(DEFAULT_BOARD_THEMES)
         self.piece_color_themes: List[PieceColorTheme] = list(DEFAULT_PIECE_COLORS)
@@ -101,6 +108,10 @@ class ChessGUI:
             ("board", "Board Color"),
             ("piece_color", "Piece Color"),
         ]
+
+        self._ensure_menlo_font()
+        self._apply_global_font()
+        self.board_font = tkfont.Font(family=BOARD_FONT[0], size=BOARD_FONT[1])
 
         self._build_widgets()
         self._configure_geometry()
@@ -200,6 +211,43 @@ class ChessGUI:
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(0, weight=0)
         main_frame.rowconfigure(1, weight=1)
+
+    def _ensure_menlo_font(self) -> None:
+        existing = {name.lower() for name in tkfont.families()}
+        if MENLO_FONT_NAME.lower() in existing:
+            return
+        if not FONT_PATH.exists():
+            raise FileNotFoundError(
+                f"Required font '{MENLO_FONT_NAME}' not found. "
+                f"Place Menlo-Regular.ttf in {FONT_DIR}."
+            )
+        try:
+            self.root.tk.call(
+                "font",
+                "create",
+                MENLO_FONT_NAME,
+                "-family",
+                MENLO_FONT_NAME,
+                "-file",
+                str(FONT_PATH),
+            )
+        except tk.TclError as exc:
+            raise RuntimeError(f"Failed to load Menlo font from {FONT_PATH}") from exc
+
+    def _apply_global_font(self) -> None:
+        targets = (
+            "TkDefaultFont",
+            "TkTextFont",
+            "TkFixedFont",
+            "TkMenuFont",
+            "TkHeadingFont",
+            "TkTooltipFont",
+        )
+        for name in targets:
+            try:
+                tkfont.nametofont(name).configure(family=MENLO_FONT_NAME)
+            except tk.TclError:
+                continue
 
     def _show_intro_screen(self) -> None:
         # 인트로 화면을 표시하고 엔터 입력을 기다린다
