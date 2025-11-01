@@ -181,6 +181,7 @@ class GameController:
                     "  quit    - exit the program immediately\n"
                     "  undo    - undo last move (yours and enemy's)\n"
                     "  redo    - redo previously undone move\n"
+                    "  hint    - get best move suggestion from Stockfish\n"
                     "Enter chess moves in Standard Algebraic Notation (SAN).\n"
                 )
                 error_message = ""
@@ -196,6 +197,19 @@ class GameController:
                     error_message = ""
                 else:
                     error_message = "Nothing to redo."
+                continue
+            if lowered == "hint":
+                try:
+                    self.last_message = "Analyzing best move..."
+                    self._render()
+                    hint_move, hint_san = self.ai.get_hint(board)
+                    # 시작 위치와 도착 위치 표시
+                    from_square = chess.square_name(hint_move.from_square)
+                    to_square = chess.square_name(hint_move.to_square)
+                    print(f"\n💡 Hint: {hint_san} (from {from_square} to {to_square})")
+                    error_message = f"Hint: {hint_san} ({from_square} → {to_square})"
+                except Exception as exc:
+                    error_message = f"Failed to get hint: {exc}"
                 continue
             try:
                 move = board.parse_san(user_input)

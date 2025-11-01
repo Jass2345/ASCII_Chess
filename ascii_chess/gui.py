@@ -85,9 +85,6 @@ class ChessGUI:
             yscrollcommand=board_scroll_y.set,
             xscrollcommand=board_scroll_x.set,
         )
-<<<<<<< HEAD
-        self.board_text.grid(row=0, column=0, rowspan=2, sticky="nsew")
-=======
         board_scroll_y.config(command=self.board_text.yview)
         board_scroll_x.config(command=self.board_text.xview)
         
@@ -97,7 +94,6 @@ class ChessGUI:
         
         board_container.rowconfigure(0, weight=1)
         board_container.columnconfigure(0, weight=1)
->>>>>>> 50074a6c55f32ac73bfe40b7ca93bf6f366b2fb0
 
         moves_frame = tk.Frame(main_frame)
         moves_frame.grid(row=0, column=1, sticky="nsew")
@@ -113,11 +109,8 @@ class ChessGUI:
             height=18,
             font=MOVE_FONT,
             state=tk.DISABLED,
-<<<<<<< HEAD
             wrap=tk.NONE,
-=======
             yscrollcommand=moves_scroll.set,
->>>>>>> 50074a6c55f32ac73bfe40b7ca93bf6f366b2fb0
         )
         moves_scroll.config(command=self.moves_text.yview)
         self.moves_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -151,29 +144,24 @@ class ChessGUI:
         self.undo_button.pack(side=tk.LEFT, padx=(0, 6))
         
         self.redo_button = tk.Button(button_row, text="Redo (Ctrl+Y)", command=self._on_redo)
-        self.redo_button.pack(side=tk.LEFT)
+        self.redo_button.pack(side=tk.LEFT, padx=(0, 6))
+        
+        self.hint_button = tk.Button(button_row, text="💡 Hint", command=self._on_hint)
+        self.hint_button.pack(side=tk.LEFT)
 
         help_label = tk.Label(
             input_frame,
-            text="Commands: ff, help, quit, undo, redo",
+            text="Commands: ff, help, quit, undo, redo, hint",
             font=STATUS_FONT,
             fg="#777",
         )
         help_label.pack(anchor="w", pady=(8, 0))
 
-<<<<<<< HEAD
-        # Grid weight 설정: 보드는 고정, 우측 패널은 확장 가능
-        main_frame.columnconfigure(0, weight=3)  # 보드 영역 (더 큰 비중)
-        main_frame.columnconfigure(1, weight=1)  # 우측 패널
-        main_frame.rowconfigure(0, weight=3)     # 기보 영역 (더 큰 비중)
-        main_frame.rowconfigure(1, weight=1)     # 입력 영역
-=======
         # Grid 가중치 설정 - 창 크기 변경 시 자동 확장
         main_frame.columnconfigure(0, weight=1)  # 보드 영역 확장
         main_frame.columnconfigure(1, weight=1)  # 기보/입력 영역 확장
         main_frame.rowconfigure(0, weight=1)     # 상단 영역 확장
         main_frame.rowconfigure(1, weight=0)     # 입력 영역은 고정
->>>>>>> 50074a6c55f32ac73bfe40b7ca93bf6f366b2fb0
 
     def _show_intro_screen(self) -> None:
         # 인트로 화면을 표시하고 엔터 입력을 기다린다
@@ -612,20 +600,14 @@ class ChessGUI:
             pass
 
     def _configure_geometry(self) -> None:
-<<<<<<< HEAD
-        # 화면 크기 감지
+        # 유동적인 창 크기 설정 - 사용자가 조절 가능
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         
-        # 기본 창 크기 계산
-=======
-        # 유동적인 창 크기 설정 - 사용자가 조절 가능
->>>>>>> 50074a6c55f32ac73bfe40b7ca93bf6f366b2fb0
         board_width = 32 * 18
         board_height = 12 * 36
         moves_width = 150
         padding = 24
-<<<<<<< HEAD
         default_w = board_width + moves_width + padding
         default_h = board_height + padding
         
@@ -646,16 +628,6 @@ class ChessGUI:
         y = (screen_height - window_h) // 2
         
         self.root.geometry(f"{window_w}x{window_h}+{x}+{y}")
-=======
-        total_w = board_width + moves_width + padding
-        total_h = board_height + padding
-        
-        # 최소 크기 설정
-        min_w = 700
-        min_h = 500
-        
-        self.root.geometry(f"{total_w}x{total_h}")
->>>>>>> 50074a6c55f32ac73bfe40b7ca93bf6f366b2fb0
         self.root.minsize(min_w, min_h)
         self.root.resizable(True, True)  # 크기 조절 가능하게 변경
 
@@ -758,3 +730,37 @@ class ChessGUI:
         self.status_label.config(text="Redone. Player to move.")
         self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
         self._render()
+    
+    def _on_hint(self) -> None:
+        # Stockfish 최고 수준으로 최선의 수를 추천한다
+        if self._awaiting_ai:
+            self.status_label.config(text="Cannot get hint while Enemy is thinking.")
+            return
+        
+        if self.board.is_game_over(claim_draw=True):
+            self.status_label.config(text="Game is over. No hints available.")
+            return
+        
+        # 플레이어 차례가 아니면 힌트 불가
+        if self.board.turn != chess.WHITE:
+            self.status_label.config(text="Hint only available on player's turn.")
+            return
+        
+        try:
+            self.status_label.config(text="Analyzing best move...")
+            self.hint_button.config(state=tk.DISABLED)
+            self.root.update_idletasks()
+            
+            hint_move, hint_san = self.ai.get_hint(self.board)
+            from_square = chess.square_name(hint_move.from_square)
+            to_square = chess.square_name(hint_move.to_square)
+            
+            hint_message = f"💡 Hint: {hint_san} (from {from_square} to {to_square})"
+            self.status_label.config(text=hint_message)
+            messagebox.showinfo("Hint", hint_message, parent=self.root)
+        except Exception as exc:
+            error_msg = f"Failed to get hint: {exc}"
+            self.status_label.config(text=error_msg)
+            messagebox.showerror("Hint Error", error_msg, parent=self.root)
+        finally:
+            self.hint_button.config(state=tk.NORMAL)
