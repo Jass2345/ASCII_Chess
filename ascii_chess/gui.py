@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import messagebox
 from typing import List, Optional
 
@@ -24,6 +26,39 @@ ENEMY_HIGHLIGHT_COLOR = "#ffcc33"
 ENEMY_BLINK_INTERVAL_MS = 350
 ENEMY_BLINK_TOGGLES = 6  # 점멸 횟수 (약 세 번)
 
+CELL_WIDTH = 3
+EDGE_LABEL_WIDTH = 2
+
+
+@dataclass(frozen=True)
+class BoardTheme:
+    name: str
+    light_color: str
+    dark_color: str
+
+
+@dataclass(frozen=True)
+class PieceColorTheme:
+    name: str
+    black_color: str
+    white_color: str
+
+
+DEFAULT_BOARD_THEMES: List[BoardTheme] = [
+    BoardTheme("default", "#1e1e1e", "#111111"),
+    BoardTheme("classic", "#f0d9b5", "#b58863"),
+    BoardTheme("ocean", "#4f6d7a", "#1f3b4d"),
+]
+
+DEFAULT_PIECE_COLORS: List[PieceColorTheme] = [
+    PieceColorTheme("default", "#eeeeee", "#eeeeee"),
+    PieceColorTheme("contrast", "#333333", "#fafafa"),
+    PieceColorTheme("emerald", "#0f5132", "#fef7e2"),
+]
+
+FALLBACK_BOARD_THEME = DEFAULT_BOARD_THEMES[0]
+FALLBACK_PIECE_COLOR = DEFAULT_PIECE_COLORS[0]
+
 
 class ChessGUI:
     def __init__(self, root: tk.Tk, engine_config: EngineConfig, use_unicode: bool = True) -> None:
@@ -34,24 +69,43 @@ class ChessGUI:
         self.root.title("ASCII Chess")
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        self.mode = "intro"
         self.engine_config = engine_config
         self.ai = StockfishAI(config=self.engine_config)
         self.use_unicode = use_unicode
         self.board = chess.Board()
         self.move_history: List[str] = []
-        self.undo_stack: List[str] = [self.board.fen()]  # FEN 히스토리
-        self.redo_stack: List[str] = []  # REDO용 FEN 스택
+        self.undo_stack: List[str] = []
+        self.redo_stack: List[str] = []
         self._awaiting_ai = False
         self._resigned = False
         self._forfeited = False
         self._enemy_highlight_square: Optional[int] = None
         self._enemy_blink_visible = True
-        self._enemy_blink_job: Optional[str] = None
+        self._enemy_blink_job: Optional[int] = None
         self._enemy_blink_remaining = 0
         self._is_rendering = False
-        self._ai_job: Optional[str] = None
+        self._ai_job: Optional[int] = None
         self._focus_binding: Optional[str] = None
         self._closing = False
+        self.board_font = tkfont.Font(family=BOARD_FONT[0], size=BOARD_FONT[1])
+
+        self.board_themes: List[BoardTheme] = list(DEFAULT_BOARD_THEMES)
+        self.piece_color_themes: List[PieceColorTheme] = list(DEFAULT_PIECE_COLORS)
+        self.selected_board_theme_index = 0
+        self.selected_piece_color_theme_index = 0
+        self.preview_board_theme: Optional[BoardTheme] = None
+        self.preview_piece_color_theme: Optional[PieceColorTheme] = None
+        self.theme_listbox: Optional[tk.Listbox] = None
+        self.theme_info_label: Optional[tk.Label] = None
+        self.theme_mode = "menu"
+        self.theme_detail_category: Optional[str] = None
+        self.theme_menu_index = 0
+        self.theme_categories = [
+            ("board", "Board Color"),
+            ("piece_color", "Piece Color"),
+        ]
+
         self._build_widgets()
         self._configure_geometry()
         self._bring_to_front()
@@ -64,18 +118,18 @@ class ChessGUI:
         main_frame.pack(fill=tk.BOTH, expand=True)
         self.main_frame = main_frame
 
-        # 보드 텍스트 위젯 - 스크롤바 추가
+        # 보드 텍스트 위젯 + 스크롤바 구성
         board_container = tk.Frame(main_frame)
         board_container.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 12))
-        
+
         board_scroll_y = tk.Scrollbar(board_container, orient=tk.VERTICAL)
         board_scroll_x = tk.Scrollbar(board_container, orient=tk.HORIZONTAL)
-        
+
         self.board_text = tk.Text(
             board_container,
-            width=20,
+            width=26,
             height=12,
-            font=BOARD_FONT,
+            font=self.board_font,
             bg="#111",
             fg="#eee",
             state=tk.DISABLED,
@@ -85,13 +139,11 @@ class ChessGUI:
             yscrollcommand=board_scroll_y.set,
             xscrollcommand=board_scroll_x.set,
         )
-        board_scroll_y.config(command=self.board_text.yview)
-        board_scroll_x.config(command=self.board_text.xview)
-        
         self.board_text.grid(row=0, column=0, sticky="nsew")
+        board_scroll_y.config(command=self.board_text.yview)
         board_scroll_y.grid(row=0, column=1, sticky="ns")
+        board_scroll_x.config(command=self.board_text.xview)
         board_scroll_x.grid(row=1, column=0, sticky="ew")
-        
         board_container.rowconfigure(0, weight=1)
         board_container.columnconfigure(0, weight=1)
 
@@ -101,6 +153,7 @@ class ChessGUI:
 
         moves_label = tk.Label(moves_frame, text="Moves", font=STATUS_FONT)
         moves_label.pack(anchor="w")
+        self.moves_label = moves_label
 
         moves_scroll = tk.Scrollbar(moves_frame, orient=tk.VERTICAL)
         self.moves_text = tk.Text(
@@ -112,22 +165,46 @@ class ChessGUI:
             wrap=tk.NONE,
             yscrollcommand=moves_scroll.set,
         )
-        moves_scroll.config(command=self.moves_text.yview)
         self.moves_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        moves_scroll.config(command=self.moves_text.yview)
         moves_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
+        self.theme_listbox = tk.Listbox(
+            moves_frame,
+            width=18,
+            height=18,
+            font=MOVE_FONT,
+            activestyle="dotbox",
+            exportselection=False,
+        )
+        self.theme_listbox.bind("<Return>", self._on_theme_activate)
+        self.theme_listbox.bind("<Double-Button-1>", self._on_theme_activate)
+        self.theme_listbox.bind("<<ListboxSelect>>", self._on_theme_selection_changed)
+        self.theme_listbox.pack_forget()
+
+        self.theme_info_label = tk.Label(
+            moves_frame,
+            text="",
+            font=STATUS_FONT,
+            fg="#999",
+            justify=tk.LEFT,
+            wraplength=240,
+        )
+        self.theme_info_label.pack_forget()
+
         input_frame = tk.Frame(main_frame)
-        input_frame.grid(row=1, column=1, sticky="sew", pady=(12, 0))
+        input_frame.grid(row=1, column=1, sticky="nsew", pady=(12, 0))
+        self.input_frame = input_frame
 
         self.status_label = tk.Label(input_frame, text="Welcome, Player!", font=STATUS_FONT)
         self.status_label.pack(anchor="w")
 
         self.enemy_label = tk.Label(input_frame, text="Enemy: Ready", font=STATUS_FONT, fg=ENEMY_BASE_COLOR)
         self.enemy_label.pack(anchor="w", pady=(4, 8))
-        self.input_frame = input_frame
 
         entry_row = tk.Frame(input_frame)
         entry_row.pack(fill=tk.X)
+        self.entry_row = entry_row
 
         self.move_entry = tk.Entry(entry_row, font=PROMPT_FONT)
         self.move_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -136,35 +213,36 @@ class ChessGUI:
         self.submit_button = tk.Button(entry_row, text="Submit", command=self._on_submit)
         self.submit_button.pack(side=tk.LEFT, padx=(6, 0))
 
-        # UNDO/REDO 버튼 추가
+        # UNDO / REDO 버튼
         button_row = tk.Frame(input_frame)
         button_row.pack(fill=tk.X, pady=(8, 0))
-        
         self.undo_button = tk.Button(button_row, text="Undo (Ctrl+Z)", command=self._on_undo)
         self.undo_button.pack(side=tk.LEFT, padx=(0, 6))
-        
         self.redo_button = tk.Button(button_row, text="Redo (Ctrl+Y)", command=self._on_redo)
-        self.redo_button.pack(side=tk.LEFT, padx=(0, 6))
-        
-        self.hint_button = tk.Button(button_row, text="💡 Hint", command=self._on_hint)
-        self.hint_button.pack(side=tk.LEFT)
+        self.redo_button.pack(side=tk.LEFT)
 
         help_label = tk.Label(
             input_frame,
-            text="Commands: ff, help, quit, undo, redo, hint",
+            text="Commands: ff, help, quit, undo, redo",
             font=STATUS_FONT,
             fg="#777",
         )
         help_label.pack(anchor="w", pady=(8, 0))
+        self.help_label = help_label
 
-        # Grid 가중치 설정 - 창 크기 변경 시 자동 확장
-        main_frame.columnconfigure(0, weight=1)  # 보드 영역 확장
-        main_frame.columnconfigure(1, weight=1)  # 기보/입력 영역 확장
-        main_frame.rowconfigure(0, weight=1)     # 상단 영역 확장
-        main_frame.rowconfigure(1, weight=0)     # 입력 영역은 고정
+        # 레이아웃 비중 설정
+        main_frame.columnconfigure(0, weight=3)
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(0, weight=3)
+        main_frame.rowconfigure(1, weight=1)
+
+    def _setup_keybindings(self) -> None:
+        self.root.bind("<Control-z>", lambda e: self._on_undo())
+        self.root.bind("<Control-y>", lambda e: self._on_redo())
 
     def _show_intro_screen(self) -> None:
         # 인트로 화면을 표시하고 엔터 입력을 기다린다
+        self.mode = "intro"
         self.main_frame.pack_forget()
 
         self.intro_frame = tk.Frame(self.root, bg="#111", padx=40, pady=40)
@@ -218,12 +296,17 @@ class ChessGUI:
         self._blink_state = True
         self._blink()
 
+        self.esc_hint_label = tk.Label(
+            self.intro_frame,
+            text="< Press Esc for theme settings >",
+            font=("Menlo", 14),
+            bg="#111",
+            fg="#bbb",
+        )
+        self.esc_hint_label.pack(pady=(0, 16))
+
         self.root.bind("<Return>", self._start_game_from_intro)
-    
-    def _setup_keybindings(self) -> None:
-        # UNDO/REDO 단축키 설정
-        self.root.bind("<Control-z>", lambda e: self._on_undo())
-        self.root.bind("<Control-y>", lambda e: self._on_redo())
+        self.root.bind("<Escape>", self._handle_escape)
 
     def _blink(self) -> None:
         if not hasattr(self, "blink_label"):
@@ -233,6 +316,230 @@ class ChessGUI:
         self.blink_label.config(fg=color)
         self.root.after(500, self._blink)
 
+    def _handle_escape(self, event: tk.Event | None = None):
+        if self.mode == "intro":
+            self._enter_theme_settings()
+            return "break"
+        if self.mode == "theme_detail":
+            self._exit_theme_detail()
+            return "break"
+        if self.mode == "theme_menu":
+            self._leave_theme_settings()
+            return "break"
+        return None
+
+    def _enter_theme_settings(self) -> None:
+        if self.mode in {"theme_menu", "theme_detail"}:
+            return
+        if hasattr(self, "intro_frame"):
+            self.root.unbind("<Return>")
+            try:
+                self.intro_frame.destroy()
+            except tk.TclError:
+                pass
+            for attr in ("intro_frame", "blink_label", "esc_hint_label"):
+                if hasattr(self, attr):
+                    delattr(self, attr)
+        self._stop_enemy_blink()
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        self.mode = "theme_menu"
+        self.moves_label.config(text="Theme Settings")
+        self.status_label.config(text="테마 옵션을 선택하세요.")
+        self.enemy_label.config(text="Enter: 옵션 열기 / Esc: 첫 화면", fg=ENEMY_BASE_COLOR)
+        self.move_entry.delete(0, tk.END)
+        self.move_entry.configure(state=tk.DISABLED)
+        self.submit_button.configure(state=tk.DISABLED)
+        self.entry_row.pack_forget()
+        self.help_label.pack_forget()
+        self._show_theme_sidebar()
+        self.board = chess.Board()
+        self.move_history.clear()
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+        self.preview_board_theme = None
+        self.preview_piece_color_theme = None
+        self._show_theme_menu()
+
+    def _leave_theme_settings(self) -> None:
+        if self.mode not in {"theme_menu", "theme_detail"}:
+            return
+        self._show_moves_sidebar()
+        self.entry_row.pack(fill=tk.X)
+        self.help_label.pack(anchor="w", pady=(8, 0))
+        self.move_entry.configure(state=tk.NORMAL)
+        self.submit_button.configure(state=tk.NORMAL)
+        self.moves_label.config(text="Moves")
+        self.status_label.config(text="Welcome, Player!")
+        self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
+        self.preview_board_theme = None
+        self.preview_piece_color_theme = None
+        self.move_history.clear()
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+        self.mode = "intro"
+        self.main_frame.pack_forget()
+        self._show_intro_screen()
+
+    def _show_theme_sidebar(self) -> None:
+        if self.theme_listbox is None or self.theme_info_label is None:
+            return
+        self.moves_text.pack_forget()
+        if not self.theme_listbox.winfo_manager():
+            self.theme_listbox.pack(fill=tk.BOTH, expand=True)
+        if not self.theme_info_label.winfo_manager():
+            self.theme_info_label.pack(anchor="w", pady=(8, 0))
+
+    def _show_moves_sidebar(self) -> None:
+        if self.theme_listbox is None or self.theme_info_label is None:
+            return
+        if self.theme_listbox.winfo_manager():
+            self.theme_listbox.pack_forget()
+        if self.theme_info_label.winfo_manager():
+            self.theme_info_label.pack_forget()
+        if not self.moves_text.winfo_manager():
+            self.moves_text.pack(fill=tk.BOTH, expand=True)
+
+    def _show_theme_menu(self) -> None:
+        if self.theme_listbox is None:
+            return
+        self._show_theme_sidebar()
+        self.mode = "theme_menu"
+        self.theme_mode = "menu"
+        self.theme_detail_category = None
+        self.preview_board_theme = None
+        self.preview_piece_color_theme = None
+
+        self.theme_listbox.delete(0, tk.END)
+        for _, label in self.theme_categories:
+            self.theme_listbox.insert(tk.END, label)
+
+        if not self.theme_categories:
+            return
+
+        self.theme_menu_index = max(0, min(self.theme_menu_index, len(self.theme_categories) - 1))
+        self.theme_listbox.selection_clear(0, tk.END)
+        self.theme_listbox.selection_set(self.theme_menu_index)
+        self.theme_listbox.activate(self.theme_menu_index)
+        self.theme_listbox.focus_set()
+
+        self.moves_label.config(text="Theme Settings")
+        self.status_label.config(text="커스터마이즈할 항목을 선택하세요.")
+        self.enemy_label.config(text="Enter: 옵션 열기 / Esc: 첫 화면", fg=ENEMY_BASE_COLOR)
+        self.theme_info_label.config(
+            text="위/아래 방향키로 이동하고 Enter로 해당 옵션을 엽니다.\n"
+            "Board Color: 보드 배경 색상 조합\n"
+            "Piece Color: 흑/백 기물 색상 지정"
+        )
+        self._render()
+
+    def _enter_theme_detail(self, category: str) -> None:
+        if self.theme_listbox is None:
+            return
+        self._show_theme_sidebar()
+        self.mode = "theme_detail"
+        self.theme_mode = "detail"
+        self.theme_detail_category = category
+        self.theme_listbox.delete(0, tk.END)
+
+        category_label = next((label for key, label in self.theme_categories if key == category), "")
+        if category_label:
+            self.moves_label.config(text=f"Theme Settings · {category_label}")
+
+        if category == "board":
+            themes = self.board_themes
+            selected_index = self.selected_board_theme_index
+            for theme in themes:
+                self.theme_listbox.insert(
+                    tk.END, f"{theme.name} ({theme.light_color}, {theme.dark_color})"
+                )
+            if themes:
+                self.preview_board_theme = themes[selected_index]
+            self.status_label.config(text="Board Color - 적용할 색상 세트를 선택하세요.")
+            self.theme_info_label.config(
+                text="선택한 색상 조합이 좌측 보드에 즉시 반영됩니다.\nEnter로 적용하고 Esc로 메뉴로 돌아갑니다."
+            )
+        elif category == "piece_color":
+            themes = self.piece_color_themes
+            selected_index = self.selected_piece_color_theme_index
+            for theme in themes:
+                self.theme_listbox.insert(
+                    tk.END, f"{theme.name} ({theme.black_color}, {theme.white_color})"
+                )
+            if themes:
+                self.preview_piece_color_theme = themes[selected_index]
+            self.status_label.config(text="Piece Color - 흑/백 기물 색상을 선택하세요.")
+            self.theme_info_label.config(
+                text="기물 전용 색상을 설정합니다. 좌측 보드에서 즉시 확인할 수 있습니다.\nEnter로 적용, Esc로 메뉴 복귀."
+            )
+        else:
+            return
+
+        total = self.theme_listbox.size()
+        if total == 0:
+            return
+        selected_index = max(0, min(selected_index, total - 1))
+        self.theme_listbox.selection_clear(0, tk.END)
+        self.theme_listbox.selection_set(selected_index)
+        self.theme_listbox.activate(selected_index)
+        self.theme_listbox.focus_set()
+        self._render()
+
+    def _exit_theme_detail(self) -> None:
+        if self.mode != "theme_detail":
+            return
+        if self.theme_detail_category == "board":
+            self.preview_board_theme = None
+        elif self.theme_detail_category == "piece_color":
+            self.preview_piece_color_theme = None
+        self.theme_detail_category = None
+        self._show_theme_menu()
+
+    def _on_theme_selection_changed(self, _event: tk.Event | None = None) -> None:
+        if self.mode != "theme_detail" or self.theme_listbox is None:
+            return
+        selection = self.theme_listbox.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        if self.theme_detail_category == "board":
+            if 0 <= index < len(self.board_themes):
+                self.preview_board_theme = self.board_themes[index]
+        elif self.theme_detail_category == "piece_color":
+            if 0 <= index < len(self.piece_color_themes):
+                self.preview_piece_color_theme = self.piece_color_themes[index]
+        self._render()
+
+    def _on_theme_activate(self, _event: tk.Event | None = None):
+        if self.theme_listbox is None:
+            return "break"
+        selection = self.theme_listbox.curselection()
+        if not selection:
+            return "break"
+        index = selection[0]
+        if self.mode == "theme_menu":
+            self.theme_menu_index = index
+            category = self.theme_categories[index][0]
+            self._enter_theme_detail(category)
+            return "break"
+        if self.mode == "theme_detail":
+            message = ""
+            if self.theme_detail_category == "board" and 0 <= index < len(self.board_themes):
+                self.selected_board_theme_index = index
+                self.preview_board_theme = None
+                message = f"보드 테마 '{self.board_themes[index].name}'을 적용했습니다."
+            elif (
+                self.theme_detail_category == "piece_color"
+                and 0 <= index < len(self.piece_color_themes)
+            ):
+                self.selected_piece_color_theme_index = index
+                self.preview_piece_color_theme = None
+                message = f"기물 색상 '{self.piece_color_themes[index].name}'을 적용했습니다."
+            if message:
+                self.status_label.config(text=message)
+            self._show_theme_menu()
+            return "break"
+        return "break"
+
     def _start_game_from_intro(self, event: tk.Event | None = None) -> None:
         # 인트로 종료 후 기본 판과 입력 상태를 세팅한다
         if not hasattr(self, "intro_frame"):
@@ -241,8 +548,11 @@ class ChessGUI:
         self.intro_frame.destroy()
         del self.intro_frame
         del self.blink_label
+        if hasattr(self, "esc_hint_label"):
+            del self.esc_hint_label
         self._stop_enemy_blink()
         self.main_frame.pack(fill=tk.BOTH, expand=True)
+        self.mode = "game_setup"
         self.status_label.config(text="Enter Enemy Elo (1350-2850, default 1500):")
         self.move_entry.delete(0, tk.END)
         self.move_entry.insert(0, "1500")
@@ -255,6 +565,8 @@ class ChessGUI:
         self.board_text.delete("1.0", tk.END)
         self.board_text.insert(tk.END, board_text)
         self.board_text.config(state=tk.DISABLED)
+        self.undo_stack = [self.board.fen()]
+        self.redo_stack.clear()
 
     def _on_submit_with_rating(self, event: tk.Event | None = None) -> None:
         text = self.move_entry.get().strip()
@@ -276,6 +588,7 @@ class ChessGUI:
         self._resigned = False
         self._forfeited = False
         self._awaiting_ai = False
+        self.mode = "game"
         self.move_entry.bind("<Return>", self._on_submit)
         self.submit_button.configure(command=self._on_submit)
         self._render()
@@ -303,8 +616,10 @@ class ChessGUI:
             messagebox.showinfo(
                 "Help",
                 "Enter chess moves in SAN (e.g. Nf3, O-O, cxd4).\n"
-                "Commands:\n  ff     - forfeit the game\n  quit   - exit the application\n"
-                "  undo   - undo last move (Ctrl+Z)\n  redo   - redo move (Ctrl+Y)",
+                "Commands:\n  ff     - forfeit the game\n"
+                "  quit   - exit the application\n"
+                "  undo   - undo last pair of moves (Ctrl+Z)\n"
+                "  redo   - redo last pair of moves (Ctrl+Y)",
                 parent=self.root,
             )
             return
@@ -343,12 +658,10 @@ class ChessGUI:
             self.status_label.config(text=f"Illegal move: {user_input}")
             return
 
-        # 플레이어 수를 두기 전 상태 저장
-        self.undo_stack.append(self.board.fen())
-        self.redo_stack.clear()  # 새 수를 두면 REDO 스택 초기화
-        
         self.board.push(move)
         self.move_history.append(san)
+        self.undo_stack.append(self.board.fen())
+        self.redo_stack.clear()
         self.status_label.config(text="Enemy is thinking...")
         self.enemy_label.config(text="Enemy: Calculating...", fg=ENEMY_BASE_COLOR)
         self._render()
@@ -371,13 +684,11 @@ class ChessGUI:
             return
 
         self._ai_job = None
-        
-        # AI 수를 두기 전 상태 저장
-        self.undo_stack.append(self.board.fen())
-        
+
         san = self.board.san(ai_move)
         self.board.push(ai_move)
         self.move_history.append(san)
+        self.undo_stack.append(self.board.fen())
         self.enemy_label.config(text=f"Enemy: {san}", fg=ENEMY_BASE_COLOR)
         self.status_label.config(text="Player to move.")
         self._awaiting_ai = False
@@ -438,9 +749,8 @@ class ChessGUI:
         # 새 대국을 시작하기 위한 상태 초기화
         self.board = chess.Board()
         self.move_history.clear()
-        self.undo_stack.clear()
+        self.undo_stack = [self.board.fen()]
         self.redo_stack.clear()
-        self.undo_stack.append(self.board.fen())  # 초기 상태 저장
         self._stop_enemy_blink()
         self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
         self.status_label.config(text="New game! Player to move.")
@@ -448,6 +758,7 @@ class ChessGUI:
         self._forfeited = False
         self._awaiting_ai = False
         self._closing = False
+        self.mode = "game"
         if self._ai_job is not None:
             try:
                 self.root.after_cancel(self._ai_job)
@@ -463,49 +774,104 @@ class ChessGUI:
         self._is_rendering = True
         try:
             board_text = self._board_to_text(self.board)
+            board_lines = board_text.splitlines() or [""]
             moves_text = self._moves_to_text(self.move_history)
 
-            self.board_text.config(state=tk.NORMAL)
+            max_cols = max(len(line) for line in board_lines)
+            board_line_count = len(board_lines)
+            self.board_text.config(state=tk.NORMAL, width=max_cols, height=board_line_count)
             self.board_text.delete("1.0", tk.END)
             self.board_text.insert(tk.END, board_text)
+            self._apply_board_theme_tags(board_lines)
             self.board_text.config(state=tk.DISABLED)
 
-            self.moves_text.config(state=tk.NORMAL)
-            self.moves_text.delete("1.0", tk.END)
-            self.moves_text.insert(tk.END, moves_text)
-            self.moves_text.config(state=tk.DISABLED)
+            if self.mode not in {"theme_menu", "theme_detail"}:
+                self.moves_text.config(state=tk.NORMAL)
+                self.moves_text.delete("1.0", tk.END)
+                self.moves_text.insert(tk.END, moves_text)
+                self.moves_text.config(state=tk.DISABLED)
+
+            undo_enabled = len(self.move_history) >= 2 and not self._awaiting_ai
+            redo_enabled = len(self.redo_stack) >= 2 and not self._awaiting_ai
+            self.undo_button.config(state=tk.NORMAL if undo_enabled else tk.DISABLED)
+            self.redo_button.config(state=tk.NORMAL if redo_enabled else tk.DISABLED)
         finally:
             self._is_rendering = False
 
+    def _apply_board_theme_tags(self, board_lines: List[str]) -> None:
+        if chess is None:
+            return
+        board_theme = self._effective_board_theme()
+        piece_theme = self._effective_piece_color_theme()
+
+        self.board_text.tag_configure("square_light", background=board_theme.light_color)
+        self.board_text.tag_configure("square_dark", background=board_theme.dark_color)
+        self.board_text.tag_configure("piece_white", foreground=piece_theme.white_color)
+        self.board_text.tag_configure("piece_black", foreground=piece_theme.black_color)
+
+        for tag in ("square_light", "square_dark", "piece_white", "piece_black"):
+            self.board_text.tag_remove(tag, "1.0", tk.END)
+
+        if len(board_lines) < 10:
+            return
+
+        for rank_offset in range(8):
+            line_number = rank_offset + 2  # 1-based line index (1=header)
+            rank_idx = 7 - rank_offset
+            for file_idx in range(8):
+                start_col = EDGE_LABEL_WIDTH + file_idx * CELL_WIDTH
+                end_col = start_col + CELL_WIDTH
+                start_index = f"{line_number}.{start_col}"
+                end_index = f"{line_number}.{end_col}"
+                square_tag = "square_light" if (file_idx + rank_idx) % 2 else "square_dark"
+                self.board_text.tag_add(square_tag, start_index, end_index)
+                square = chess.square(file_idx, rank_idx)
+                piece = self.board.piece_at(square)
+                blink_hidden = (
+                    self._enemy_highlight_square == square and not self._enemy_blink_visible
+                )
+                if piece and not blink_hidden:
+                    piece_tag = "piece_white" if piece.color == chess.WHITE else "piece_black"
+                    self.board_text.tag_add(piece_tag, start_index, end_index)
+
+    def _effective_board_theme(self) -> BoardTheme:
+        if self.preview_board_theme is not None:
+            return self.preview_board_theme
+        if not self.board_themes:
+            return FALLBACK_BOARD_THEME
+        index = self.selected_board_theme_index % len(self.board_themes)
+        return self.board_themes[index]
+
+    def _effective_piece_color_theme(self) -> PieceColorTheme:
+        if self.preview_piece_color_theme is not None:
+            return self.preview_piece_color_theme
+        if not self.piece_color_themes:
+            return FALLBACK_PIECE_COLOR
+        index = self.selected_piece_color_theme_index % len(self.piece_color_themes)
+        return self.piece_color_themes[index]
+
     def _board_to_text(self, board: "chess.Board") -> str:
-        # 보드 상태를 텍스트 행렬로 변환한다 (고정폭 폰트에 맞춘 간격)
-        # 파일 레이블: 각 문자 사이에 2칸 공백으로 체스판 칸과 정렬
-        files = "   a  b  c  d  e  f  g  h"
-        lines = [files]
+        # 보드 상태를 텍스트 행렬로 변환한다
+        header_cells = [chr(ord("a") + file).center(CELL_WIDTH) for file in range(8)]
+        header = " " * EDGE_LABEL_WIDTH + "".join(header_cells) + " " * EDGE_LABEL_WIDTH
+        lines = [header]
         for rank in range(7, -1, -1):
-            row_parts = [str(rank + 1) + " "]
+            square_chunks: List[str] = []
             for file in range(8):
                 square = chess.square(file, rank)
                 piece = board.piece_at(square)
-                bg_char = LIGHT_SQUARE if (rank + file) % 2 else DARK_SQUARE
-                
-                if piece is None:
-                    # 빈 칸: 배경 문자를 중앙에 배치 (양쪽 공백)
-                    cell = " " + bg_char + " "
+                blink_hidden = (
+                    self._enemy_highlight_square == square and not self._enemy_blink_visible
+                )
+                if piece is None or blink_hidden:
+                    symbol = LIGHT_SQUARE if (rank + file) % 2 else DARK_SQUARE
                 else:
                     symbol = self._piece_symbol(piece.symbol())
-                    if self._enemy_highlight_square == square and not self._enemy_blink_visible:
-                        cell = " " + bg_char + " "
-                    else:
-                        # 기물: 중앙에 배치 (양쪽 공백)
-                        cell = " " + symbol + " "
-                
-                row_parts.append(cell)
-            
-            row_parts.append(str(rank + 1))
-            line = "".join(row_parts)
+                square_chunks.append(symbol.center(CELL_WIDTH))
+            row_label = str(rank + 1).center(EDGE_LABEL_WIDTH)
+            line = f"{row_label}{''.join(square_chunks)}{row_label}"
             lines.append(line)
-        lines.append(files)
+        lines.append(header)
         return "\n".join(lines)
 
     def _piece_symbol(self, symbol: str) -> str:
@@ -600,36 +966,20 @@ class ChessGUI:
             pass
 
     def _configure_geometry(self) -> None:
-        # 유동적인 창 크기 설정 - 사용자가 조절 가능
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        
+        # 기본 창 크기를 계산하고 최소 크기를 설정한다
         board_width = 32 * 18
         board_height = 12 * 36
         moves_width = 150
         padding = 24
-        default_w = board_width + moves_width + padding
-        default_h = board_height + padding
-        
-        # 화면 크기의 80%를 최대로 설정
-        max_w = int(screen_width * 0.8)
-        max_h = int(screen_height * 0.8)
-        
-        # 화면에 맞춰 크기 조정
-        window_w = min(default_w, max_w)
-        window_h = min(default_h, max_h)
-        
-        # 최소 크기 설정 (UI가 깨지지 않도록)
+        total_w = board_width + moves_width + padding
+        total_h = board_height + padding
+
         min_w = 700
         min_h = 500
-        
-        # 창을 화면 중앙에 배치
-        x = (screen_width - window_w) // 2
-        y = (screen_height - window_h) // 2
-        
-        self.root.geometry(f"{window_w}x{window_h}+{x}+{y}")
+
+        self.root.geometry(f"{total_w}x{total_h}")
         self.root.minsize(min_w, min_h)
-        self.root.resizable(True, True)  # 크기 조절 가능하게 변경
+        self.root.resizable(True, True)
 
     def _bring_to_front(self) -> None:
         try:
@@ -651,116 +1001,78 @@ class ChessGUI:
                 except tk.TclError:
                     pass
                 self._focus_binding = None
-    
+
     def _on_undo(self) -> None:
-        # 마지막 플레이어 수와 AI 수를 되돌린다 (2수)
         if self._awaiting_ai:
             self.status_label.config(text="Cannot undo while Enemy is thinking.")
             return
-        
-        if len(self.undo_stack) < 3:  # 초기 상태 + 플레이어 수 + AI 수
+        if len(self.move_history) < 2:
             self.status_label.config(text="Nothing to undo.")
             return
-        
-        # 현재 상태를 REDO 스택에 저장 (AI 수)
-        if self.move_history:
-            self.redo_stack.append(self.move_history[-1])
-        
-        # AI 수 되돌리기
-        self.board.pop()
-        self.undo_stack.pop()
-        if self.move_history:
-            self.move_history.pop()
-        
-        # 플레이어 수도 REDO 스택에 저장
-        if self.move_history:
-            self.redo_stack.append(self.move_history[-1])
-        
-        # 플레이어 수 되돌리기
-        self.board.pop()
-        self.undo_stack.pop()
-        if self.move_history:
-            self.move_history.pop()
-        
+
         self._stop_enemy_blink()
+
+        # Undo AI move
+        ai_san = self.move_history.pop()
+        self.redo_stack.append(ai_san)
+        self.board.pop()
+        if self.undo_stack:
+            self.undo_stack.pop()
+
+        # Undo player move
+        player_san = self.move_history.pop()
+        self.redo_stack.append(player_san)
+        self.board.pop()
+        if self.undo_stack:
+            self.undo_stack.pop()
+
+        if not self.undo_stack:
+            self.undo_stack.append(self.board.fen())
+
         self.status_label.config(text="Undone. Player to move.")
         self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
         self._render()
-    
+
     def _on_redo(self) -> None:
-        # REDO 스택에서 상태를 복원한다 (2수)
         if self._awaiting_ai:
             self.status_label.config(text="Cannot redo while Enemy is thinking.")
             return
-        
-        if len(self.redo_stack) < 2:  # 플레이어 수 + AI 수
+        if len(self.redo_stack) < 2:
             self.status_label.config(text="Nothing to redo.")
             return
-        
-        # 플레이어 수 REDO
-        player_move_san = self.redo_stack.pop()
-        try:
-            player_move = self.board.parse_san(player_move_san)
-            self.undo_stack.append(self.board.fen())
-            self.board.push(player_move)
-            self.move_history.append(player_move_san)
-        except ValueError:
-            self.redo_stack.append(player_move_san)
-            self.status_label.config(text="Redo failed.")
-            return
-        
-        # AI 수 REDO
-        ai_move_san = self.redo_stack.pop()
-        try:
-            ai_move = self.board.parse_san(ai_move_san)
-            self.undo_stack.append(self.board.fen())
-            self.board.push(ai_move)
-            self.move_history.append(ai_move_san)
-        except ValueError:
-            # AI 수 복원 실패시 플레이어 수도 되돌림
-            self.board.pop()
-            self.undo_stack.pop()
-            self.move_history.pop()
-            self.redo_stack.append(player_move_san)
-            self.redo_stack.append(ai_move_san)
-            self.status_label.config(text="Redo failed.")
-            return
-        
+
         self._stop_enemy_blink()
+
+        # Redo player move (last appended)
+        player_san = self.redo_stack.pop()
+        try:
+            player_move = self.board.parse_san(player_san)
+        except ValueError:
+            self.status_label.config(text="Redo failed.")
+            self.redo_stack.append(player_san)
+            return
+        self.board.push(player_move)
+        self.move_history.append(player_san)
+        self.undo_stack.append(self.board.fen())
+
+        # Redo AI move
+        ai_san = self.redo_stack.pop()
+        try:
+            ai_move = self.board.parse_san(ai_san)
+        except ValueError:
+            self.board.pop()
+            self.move_history.pop()
+            if self.undo_stack:
+                self.undo_stack.pop()
+            self.redo_stack.append(player_san)
+            self.redo_stack.append(ai_san)
+            self.status_label.config(text="Redo failed.")
+            return
+
+        self.board.push(ai_move)
+        self.move_history.append(ai_san)
+        self.undo_stack.append(self.board.fen())
+
         self.status_label.config(text="Redone. Player to move.")
         self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
         self._render()
-    
-    def _on_hint(self) -> None:
-        # Stockfish 최고 수준으로 최선의 수를 추천한다
-        if self._awaiting_ai:
-            self.status_label.config(text="Cannot get hint while Enemy is thinking.")
-            return
-        
-        if self.board.is_game_over(claim_draw=True):
-            self.status_label.config(text="Game is over. No hints available.")
-            return
-        
-        # 플레이어 차례가 아니면 힌트 불가
-        if self.board.turn != chess.WHITE:
-            self.status_label.config(text="Hint only available on player's turn.")
-            return
-        
-        try:
-            self.status_label.config(text="Analyzing best move...")
-            self.hint_button.config(state=tk.DISABLED)
-            self.root.update_idletasks()
-            
-            hint_move, hint_san = self.ai.get_hint(self.board)
-            from_square = chess.square_name(hint_move.from_square)
-            to_square = chess.square_name(hint_move.to_square)
-            
-            hint_message = f"💡 Hint: {hint_san} (from {from_square} to {to_square})"
-            self.status_label.config(text=hint_message)
-            messagebox.showinfo("Hint", hint_message, parent=self.root)
-        except Exception as exc:
-            error_msg = f"Failed to get hint: {exc}"
-            self.status_label.config(text=error_msg)
-            messagebox.showerror("Hint Error", error_msg, parent=self.root)
-        finally:
-            self.hint_button.config(state=tk.NORMAL)
