@@ -1,26 +1,28 @@
 from __future__ import annotations
+import platform
 
 def is_admin():
-    """Check if the script is running with administrator privileges"""
+    """Check if the script is running with administrator privileges (Windows only)"""
+    if platform.system() != "Windows":
+        return True  # macOS/Linux에서는 항상 True 반환
     try:
         import ctypes
         return ctypes.windll.shell32.IsUserAnAdmin()
     except:
         return False
 
-def run_as_admin():
-    """Rerun the script with administrator privileges"""
+# Windows에서만 관리자 권한 확인 및 요청
+if platform.system() == "Windows" and not is_admin():
     import sys
     import ctypes
     
-    if not is_admin():
-        print("관리자 권한이 필요합니다. 권한을 요청합니다...")
-        ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", sys.executable, " ".join(sys.argv), None, 1)
-        sys.exit(0)
-
-# 관리자 권한 확인 및 요청
-run_as_admin()
+    # 현재 스크립트의 절대 경로 가져오기
+    import os
+    script = os.path.abspath(sys.argv[0])
+    
+    print("폰트 설치를 위해 관리자 권한이 필요합니다. 권한을 요청합니다...")
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{script}"', None, 1)
+    sys.exit(0)
 
 import argparse
 import os
