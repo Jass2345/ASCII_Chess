@@ -1436,8 +1436,8 @@ class ChessGUI:
 
     def _configure_geometry(self) -> None:
         # 기본 창 크기를 계산하고 최소 크기를 설정한다
-        board_width = 32 * 18
-        board_height = 12 * 36
+        board_width = 33 * 20
+        board_height = 15 * 36
         moves_width = 150
         padding = 24
         total_w = board_width + moves_width + padding
@@ -1447,8 +1447,9 @@ class ChessGUI:
         min_h = 500
 
         self.root.geometry(f"{total_w}x{total_h}")
-        self.root.minsize(min_w, min_h)
-        self.root.resizable(True, True)
+        self.root.minsize(total_w, total_h)
+        self.root.maxsize(total_w, total_h)
+        self.root.resizable(False, False)
 
     def _bring_to_front(self) -> None:
         try:
