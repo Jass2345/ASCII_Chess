@@ -575,6 +575,8 @@ class ChessGUI:
 
     def _handle_escape(self, event: tk.Event | None = None):
         if self.mode == "intro":
+            if messagebox.askyesno("Exit", "정말 프로그램을 종료할까요?", parent=self.root):
+                self._exit_game()
             return "break"
         if self.mode == "theme_detail":
             self._exit_theme_detail()
@@ -824,6 +826,9 @@ class ChessGUI:
         self.intro_frame.destroy()
         del self.intro_frame
         self._stop_enemy_blink()
+        if not self._timers_visible:
+            self.timers_row.pack(fill=tk.X, pady=(0, 4))
+            self._timers_visible = True
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         self.mode = "game_setup"
         self.move_entry.configure(state=tk.NORMAL)
@@ -943,7 +948,8 @@ class ChessGUI:
             self.status_label.config(text="Player forfeited. Enemy wins.")
             self.enemy_label.config(text="Enemy: Victory", fg=ENEMY_BASE_COLOR)
             messagebox.showinfo("Game over", "Player forfeited. Enemy wins.", parent=self.root)
-            self._ask_play_again()
+            if not self._ask_play_again():
+                self._return_to_intro()
             return
 
         try:
@@ -1050,7 +1056,8 @@ class ChessGUI:
         self.status_label.config(text=message)
         self.enemy_label.config(text=enemy_text, fg=ENEMY_BASE_COLOR)
         messagebox.showinfo("Game over", message, parent=self.root)
-        self._ask_play_again()
+        if not self._ask_play_again():
+            self._return_to_intro()
 
     def _announce_result(self) -> None:
         # 실제 대국 결과를 팝업으로 알리고 재도전을 묻는다
@@ -1075,14 +1082,44 @@ class ChessGUI:
             self.enemy_label.config(text="Enemy: Draw")
         else:
             self.enemy_label.config(text="Enemy: Idle")
-        self._ask_play_again()
+        if not self._ask_play_again():
+            self._return_to_intro()
 
-    def _ask_play_again(self) -> None:
+    def _ask_play_again(self) -> bool:
         again = messagebox.askyesno("Play again?", "Would you like to start a new game?", parent=self.root)
         if again:
             self._reset_game()
-        else:
-            self._exit_game()
+            return True
+        return False
+
+    def _return_to_intro(self) -> None:
+        self._cancel_timer()
+        self._stop_enemy_blink()
+        self._clear_hint_highlights()
+        if self._timers_visible:
+            self.timers_row.pack_forget()
+            self._timers_visible = False
+        self.move_entry.delete(0, tk.END)
+        self.move_entry.configure(state=tk.DISABLED)
+        self.status_label.config(text="Welcome, Player!")
+        self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
+        self.board = chess.Board()
+        self.move_history.clear()
+        self.undo_stack = [self.board.fen()]
+        self.redo_stack.clear()
+        self._awaiting_ai = False
+        self._resigned = False
+        self._forfeited = False
+        self._shortcuts_enabled = False
+        self._hint_enabled = False
+        self.mode = "intro"
+        self.main_frame.pack_forget()
+        if hasattr(self, "intro_frame"):
+            try:
+                self.intro_frame.destroy()
+            except tk.TclError:
+                pass
+        self._show_intro_screen()
 
     def _reset_game(self) -> None:
         # 새 대국을 시작하기 위한 상태 초기화
@@ -1098,6 +1135,8 @@ class ChessGUI:
         self._awaiting_ai = False
         self._closing = False
         self.mode = "game"
+        self._shortcuts_enabled = True
+        self._hint_enabled = True
         if self._ai_job is not None:
             try:
                 self.root.after_cancel(self._ai_job)
