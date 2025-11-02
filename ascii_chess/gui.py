@@ -32,6 +32,7 @@ ENEMY_BLINK_TOGGLES = 6  # 점멸 횟수 (약 세 번)
 
 CELL_WIDTH = 3
 EDGE_LABEL_WIDTH = 2
+LISTBOX_WIDTH = 18
 
 
 @dataclass(frozen=True)
@@ -57,7 +58,6 @@ DEFAULT_BOARD_THEMES: List[BoardTheme] = [
 DEFAULT_PIECE_COLORS: List[PieceColorTheme] = [
     PieceColorTheme("default", "#eeeeee", "#eeeeee"),
     PieceColorTheme("contrast", "#333333", "#fafafa"),
-    PieceColorTheme("emerald", "#0f5132", "#fef7e2"),
 ]
 
 FALLBACK_BOARD_THEME = DEFAULT_BOARD_THEMES[0]
@@ -125,11 +125,15 @@ class ChessGUI:
         self._ensure_menlo_font()
         self._apply_global_font()
         self.board_font = tkfont.Font(family=BOARD_FONT[0], size=BOARD_FONT[1])
+        self._shortcuts_enabled = True
+        self._hint_enabled = True
+        self._timers_visible = True
 
         self._build_widgets()
         self._configure_geometry()
         self._bring_to_front()
         self._setup_keybindings()
+        self.root.bind("<Configure>", self._on_root_configure, add=True)
         self._show_intro_screen()
 
     def _build_widgets(self) -> None:
@@ -138,12 +142,9 @@ class ChessGUI:
         main_frame.pack(fill=tk.BOTH, expand=True)
         self.main_frame = main_frame
 
-        # 보드 텍스트 위젯 + 스크롤바 구성
+        # 보드 텍스트 위젯 구성
         board_container = tk.Frame(main_frame)
         board_container.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 12))
-
-        board_scroll_y = tk.Scrollbar(board_container, orient=tk.VERTICAL)
-        board_scroll_x = tk.Scrollbar(board_container, orient=tk.HORIZONTAL)
 
         self.board_text = tk.Text(
             board_container,
@@ -158,14 +159,8 @@ class ChessGUI:
             wrap=tk.NONE,
             spacing1=10,
             spacing3=10,
-            yscrollcommand=board_scroll_y.set,
-            xscrollcommand=board_scroll_x.set,
         )
         self.board_text.grid(row=0, column=0, sticky="nsew")
-        board_scroll_y.config(command=self.board_text.yview)
-        board_scroll_y.grid(row=0, column=1, sticky="ns")
-        board_scroll_x.config(command=self.board_text.xview)
-        board_scroll_x.grid(row=1, column=0, sticky="ew")
         board_container.rowconfigure(0, weight=1)
         board_container.columnconfigure(0, weight=1)
 
@@ -177,7 +172,6 @@ class ChessGUI:
         moves_label.pack(anchor="w")
         self.moves_label = moves_label
 
-        moves_scroll = tk.Scrollbar(moves_frame, orient=tk.VERTICAL)
         self.moves_text = tk.Text(
             moves_frame,
             width=18,
@@ -185,15 +179,12 @@ class ChessGUI:
             font=MOVE_FONT,
             state=tk.DISABLED,
             wrap=tk.NONE,
-            yscrollcommand=moves_scroll.set,
         )
         self.moves_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        moves_scroll.config(command=self.moves_text.yview)
-        moves_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.theme_listbox = tk.Listbox(
             moves_frame,
-            width=18,
+            width=LISTBOX_WIDTH,
             height=18,
             font=MOVE_FONT,
             activestyle="dotbox",
@@ -210,7 +201,7 @@ class ChessGUI:
             font=STATUS_FONT,
             fg="#999",
             justify=tk.LEFT,
-            wraplength=240,
+            wraplength=18 * tkfont.Font(font=MOVE_FONT).measure("M"),
         )
         self.theme_info_label.pack_forget()
 
@@ -218,11 +209,24 @@ class ChessGUI:
         input_frame.grid(row=1, column=1, sticky="nsew", pady=(12, 0))
         self.input_frame = input_frame
 
-        self.status_label = tk.Label(input_frame, text="Welcome, Player!", font=STATUS_FONT)
-        self.status_label.pack(anchor="w")
+        self.status_label = tk.Label(
+            input_frame,
+            text="Welcome, Player!",
+            font=STATUS_FONT,
+            justify=tk.RIGHT,
+            anchor="e",
+        )
+        self.status_label.pack(anchor="e", fill=tk.X)
 
-        self.enemy_label = tk.Label(input_frame, text="Enemy: Ready", font=STATUS_FONT, fg=ENEMY_BASE_COLOR)
-        self.enemy_label.pack(anchor="w", pady=(4, 8))
+        self.enemy_label = tk.Label(
+            input_frame,
+            text="Enemy: Ready",
+            font=STATUS_FONT,
+            fg=ENEMY_BASE_COLOR,
+            justify=tk.RIGHT,
+            anchor="e",
+        )
+        self.enemy_label.pack(anchor="e", fill=tk.X, pady=(4, 8))
 
         # 타이머 라벨 (기보 입력 위에 작게 표시)
         timers_row = tk.Frame(input_frame)
@@ -240,19 +244,6 @@ class ChessGUI:
         self.move_entry = tk.Entry(entry_row, font=PROMPT_FONT)
         self.move_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.move_entry.bind("<Return>", self._on_submit)
-
-        self.submit_button = tk.Button(entry_row, text="Submit", command=self._on_submit)
-        self.submit_button.pack(side=tk.LEFT, padx=(6, 0))
-
-        # UNDO / REDO / HINT 버튼
-        button_row = tk.Frame(input_frame)
-        button_row.pack(fill=tk.X, pady=(8, 0))
-        self.undo_button = tk.Button(button_row, text="Undo (Ctrl+Z)", command=self._on_undo)
-        self.undo_button.pack(side=tk.LEFT, padx=(0, 6))
-        self.redo_button = tk.Button(button_row, text="Redo (Ctrl+Y)", command=self._on_redo)
-        self.redo_button.pack(side=tk.LEFT, padx=(0, 6))
-        self.hint_button = tk.Button(button_row, text="💡 Hint (Ctrl+H)", command=self._get_hint, fg="blue")
-        self.hint_button.pack(side=tk.LEFT)
 
         help_label = tk.Label(
             input_frame,
@@ -293,6 +284,9 @@ class ChessGUI:
 
     def _get_hint(self) -> None:
         """Stockfish로부터 힌트를 가져와 표시합니다."""
+        if not self._hint_enabled or self.mode != "game":
+            self.status_label.config(text="힌트는 게임 중에만 사용할 수 있습니다.")
+            return
         if not hasattr(self, 'board') or self.board.is_game_over():
             self.status_label.config(text="게임이 종료되었습니다.")
             return
@@ -404,11 +398,29 @@ class ChessGUI:
                 continue
 
     def _setup_keybindings(self) -> None:
-        self.root.bind("<Control-z>", lambda e: self._on_undo())
-        self.root.bind("<Control-y>", lambda e: self._on_redo())
-        self.root.bind("<Control-h>", lambda e: self._get_hint())
-        self.root.bind("<Control-H>", lambda e: self._get_hint())
+        self.root.bind("<Control-z>", self._handle_undo_shortcut)
+        self.root.bind("<Control-y>", self._handle_redo_shortcut)
+        self.root.bind("<Control-h>", self._handle_hint_shortcut)
+        self.root.bind("<Control-H>", self._handle_hint_shortcut)
         self.root.bind("<Escape>", self._handle_escape)
+
+    def _handle_undo_shortcut(self, event: tk.Event | None = None):
+        if not self._shortcuts_enabled:
+            return "break"
+        self._on_undo()
+        return "break"
+
+    def _handle_redo_shortcut(self, event: tk.Event | None = None):
+        if not self._shortcuts_enabled:
+            return "break"
+        self._on_redo()
+        return "break"
+
+    def _handle_hint_shortcut(self, event: tk.Event | None = None):
+        if not self._shortcuts_enabled or not self._hint_enabled:
+            return "break"
+        self._get_hint()
+        return "break"
 
     def _show_intro_screen(self) -> None:
         # 인트로 화면을 표시하고 엔터 입력을 기다린다
@@ -416,7 +428,6 @@ class ChessGUI:
         if hasattr(self, "move_entry"):
             try:
                 self.move_entry.configure(state=tk.DISABLED)
-                self.submit_button.configure(state=tk.DISABLED)
             except tk.TclError:
                 pass
         self.main_frame.pack_forget()
@@ -467,6 +478,7 @@ class ChessGUI:
             font=("Menlo", 12),
             bg="#111",
             fg="#bbb",
+            justify=tk.CENTER,
         )
         hint_label.pack(pady=(0, 20))
 
@@ -479,10 +491,12 @@ class ChessGUI:
         for option in self.intro_options:
             label = tk.Label(
                 self.intro_menu_frame,
+                width=LISTBOX_WIDTH,
                 text=option,
                 font=("Menlo", 18, "bold"),
                 bg="#111",
                 fg="#bbb",
+                anchor="center",
             )
             label.pack(pady=6)
             self.intro_option_labels.append(label)
@@ -581,6 +595,13 @@ class ChessGUI:
             except tk.TclError:
                 pass
             del self.intro_frame
+        self._shortcuts_enabled = False
+        self._hint_enabled = False
+        self._clear_hint_highlights()
+        if self._timers_visible:
+            self.timers_row.pack_forget()
+            self._timers_visible = False
+        self._cancel_timer()
         self._stop_enemy_blink()
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         self.mode = "theme_menu"
@@ -589,7 +610,6 @@ class ChessGUI:
         self.enemy_label.config(text="Enter: 옵션 열기 / Esc: 첫 화면", fg=ENEMY_BASE_COLOR)
         self.move_entry.delete(0, tk.END)
         self.move_entry.configure(state=tk.DISABLED)
-        self.submit_button.configure(state=tk.DISABLED)
         self.entry_row.pack_forget()
         self.help_label.pack_forget()
         self._show_theme_sidebar()
@@ -604,11 +624,15 @@ class ChessGUI:
     def _leave_theme_settings(self) -> None:
         if self.mode not in {"theme_menu", "theme_detail"}:
             return
+        self._shortcuts_enabled = True
+        self._hint_enabled = True
+        if not self._timers_visible:
+            self.timers_row.pack(fill=tk.X, pady=(0, 4))
+            self._timers_visible = True
         self._show_moves_sidebar()
         self.entry_row.pack(fill=tk.X)
         self.help_label.pack(anchor="w", pady=(8, 0))
         self.move_entry.configure(state=tk.NORMAL)
-        self.submit_button.configure(state=tk.NORMAL)
         self.moves_label.config(text="Moves")
         self.status_label.config(text="Welcome, Player!")
         self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
@@ -629,6 +653,7 @@ class ChessGUI:
             self.theme_listbox.pack(fill=tk.BOTH, expand=True)
         if not self.theme_info_label.winfo_manager():
             self.theme_info_label.pack(anchor="w", pady=(8, 0))
+        self.theme_info_label.config(width=LISTBOX_WIDTH)
 
     def _show_moves_sidebar(self) -> None:
         if self.theme_listbox is None or self.theme_info_label is None:
@@ -639,6 +664,15 @@ class ChessGUI:
             self.theme_info_label.pack_forget()
         if not self.moves_text.winfo_manager():
             self.moves_text.pack(fill=tk.BOTH, expand=True)
+
+    def _on_root_configure(self, _event: tk.Event | None = None) -> None:
+        self._update_theme_info_wraplength()
+
+    def _update_theme_info_wraplength(self) -> None:
+        if self.theme_info_label is None or not self.theme_info_label.winfo_exists():
+            return
+        wrap = tkfont.Font(font=MOVE_FONT).measure("M" * LISTBOX_WIDTH)
+        self.theme_info_label.config(wraplength=wrap, width=LISTBOX_WIDTH)
 
     def _show_theme_menu(self) -> None:
         if self.theme_listbox is None:
@@ -651,6 +685,7 @@ class ChessGUI:
         self.preview_piece_color_theme = None
 
         self.theme_listbox.delete(0, tk.END)
+        self.theme_listbox.configure(width=LISTBOX_WIDTH)
         for _, label in self.theme_categories:
             self.theme_listbox.insert(tk.END, label)
 
@@ -664,13 +699,14 @@ class ChessGUI:
         self.theme_listbox.focus_set()
 
         self.moves_label.config(text="Theme Settings")
-        self.status_label.config(text="커스터마이즈할 항목을 선택하세요.")
+        self.status_label.config(text="테마 설정 항목을\n선택하세요.")
         self.enemy_label.config(text="Enter: 옵션 열기 / Esc: 첫 화면", fg=ENEMY_BASE_COLOR)
         self.theme_info_label.config(
             text="위/아래 방향키로 이동하고 Enter로 해당 옵션을 엽니다.\n"
             "Board Color: 보드 배경 색상 조합\n"
             "Piece Color: 흑/백 기물 색상 지정"
         )
+        self._update_theme_info_wraplength()
         self._render()
 
     def _enter_theme_detail(self, category: str) -> None:
@@ -681,6 +717,7 @@ class ChessGUI:
         self.theme_mode = "detail"
         self.theme_detail_category = category
         self.theme_listbox.delete(0, tk.END)
+        self.theme_listbox.configure(width=LISTBOX_WIDTH)
 
         category_label = next((label for key, label in self.theme_categories if key == category), "")
         if category_label:
@@ -690,28 +727,26 @@ class ChessGUI:
             themes = self.board_themes
             selected_index = self.selected_board_theme_index
             for theme in themes:
-                self.theme_listbox.insert(
-                    tk.END, f"{theme.name} ({theme.light_color}, {theme.dark_color})"
-                )
+                self.theme_listbox.insert(tk.END, theme.name)
             if themes:
                 self.preview_board_theme = themes[selected_index]
-            self.status_label.config(text="Board Color - 적용할 색상 세트를 선택하세요.")
+            self.status_label.config(text="Board Color -\n적용할 색상 세트를\n선택하세요.")
             self.theme_info_label.config(
                 text="선택한 색상 조합이 좌측 보드에 즉시 반영됩니다.\nEnter로 적용하고 Esc로 메뉴로 돌아갑니다."
             )
+            self._update_theme_info_wraplength()
         elif category == "piece_color":
             themes = self.piece_color_themes
             selected_index = self.selected_piece_color_theme_index
             for theme in themes:
-                self.theme_listbox.insert(
-                    tk.END, f"{theme.name} ({theme.black_color}, {theme.white_color})"
-                )
+                self.theme_listbox.insert(tk.END, theme.name)
             if themes:
                 self.preview_piece_color_theme = themes[selected_index]
-            self.status_label.config(text="Piece Color - 흑/백 기물 색상을 선택하세요.")
+            self.status_label.config(text="Piece Color -\n흑/백 기물 색상을\n선택하세요.")
             self.theme_info_label.config(
                 text="기물 전용 색상을 설정합니다. 좌측 보드에서 즉시 확인할 수 있습니다.\nEnter로 적용, Esc로 메뉴 복귀."
             )
+            self._update_theme_info_wraplength()
         else:
             return
 
@@ -792,14 +827,12 @@ class ChessGUI:
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         self.mode = "game_setup"
         self.move_entry.configure(state=tk.NORMAL)
-        self.submit_button.configure(state=tk.NORMAL)
-        self.status_label.config(text="Enter Enemy Elo (1350-2850, default 1500):")
+        self.status_label.config(text="Enter Enemy Elo\n(1350-2850, default 1500)")
         self.move_entry.delete(0, tk.END)
         self.move_entry.insert(0, "1500")
         self.move_entry.selection_range(0, tk.END)
         self.move_entry.focus_set()
         self.move_entry.bind("<Return>", self._on_submit_with_rating)
-        self.submit_button.configure(command=self._on_submit_with_rating)
         self.undo_stack = [self.board.fen()]
         self.redo_stack.clear()
         self._render()
@@ -820,13 +853,12 @@ class ChessGUI:
         self.ai.set_rating(rating)
         # 시간 모드 선택 단계로 이동
         self.mode = "time_select"
-        self.status_label.config(text="시간 모드를 선택하세요: 1) 10분  2) 3분  3) 무제한")
+        self.status_label.config(text="Select game mode\n (1:Rapid 2:Blitz 3:Practice)")
         self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
         self.move_entry.insert(0, "1")
         self.move_entry.selection_range(0, tk.END)
         self.move_entry.focus_set()
         self.move_entry.bind("<Return>", self._on_submit_time_mode)
-        self.submit_button.configure(command=self._on_submit_time_mode)
         self._render()
 
     def _on_submit_time_mode(self, event: tk.Event | None = None) -> None:
@@ -834,11 +866,11 @@ class ChessGUI:
         try:
             choice = int(choice_text)
         except ValueError:
-            self.status_label.config(text="1, 2, 3 중 하나를 입력하세요. (1=10분, 2=3분, 3=무제한)")
+            self.status_label.config(text="Please enter one of the values (1, 2, 3)")
             self.move_entry.selection_range(0, tk.END)
             return
         if choice not in (1, 2, 3):
-            self.status_label.config(text="1, 2, 3 중 하나를 입력하세요. (1=10분, 2=3분, 3=무제한)")
+            self.status_label.config(text="Please enter one of the values (1, 2, 3)")
             self.move_entry.selection_range(0, tk.END)
             return
         self.move_entry.delete(0, tk.END)
@@ -849,7 +881,6 @@ class ChessGUI:
         self.mode = "game"
         self.status_label.config(text="Enemy rating set. Player to move.")
         self.move_entry.bind("<Return>", self._on_submit)
-        self.submit_button.configure(command=self._on_submit)
         self._render()
         self._start_timer_tick()
 
@@ -1103,10 +1134,6 @@ class ChessGUI:
                 self.moves_text.insert(tk.END, moves_text)
                 self.moves_text.config(state=tk.DISABLED)
 
-            undo_enabled = len(self.move_history) >= 2 and not self._awaiting_ai
-            redo_enabled = len(self.redo_stack) >= 2 and not self._awaiting_ai
-            self.undo_button.config(state=tk.NORMAL if undo_enabled else tk.DISABLED)
-            self.redo_button.config(state=tk.NORMAL if redo_enabled else tk.DISABLED)
         finally:
             self._is_rendering = False
 
@@ -1406,6 +1433,9 @@ class ChessGUI:
                 self._focus_binding = None
 
     def _on_undo(self) -> None:
+        if self.mode != "game":
+            self.status_label.config(text="Undo is only available during the game.")
+            return
         if self._awaiting_ai:
             self.status_label.config(text="Cannot undo while Enemy is thinking.")
             return
@@ -1437,6 +1467,9 @@ class ChessGUI:
         self._render()
 
     def _on_redo(self) -> None:
+        if self.mode != "game":
+            self.status_label.config(text="Redo is only available during the game.")
+            return
         if self._awaiting_ai:
             self.status_label.config(text="Cannot redo while Enemy is thinking.")
             return
