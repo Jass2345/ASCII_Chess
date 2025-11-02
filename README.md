@@ -2,6 +2,45 @@
 
 Tkinter 기반으로 Stockfish 엔진과 대국하는 GUI 전용 ASCII 체스 애플리케이션입니다. 인트로 화면에서 게임 시작과 테마 설정을 선택하고, 게임 도중에는 SAN 표기법으로 수를 입력해 플레이합니다.
 
+터미널 또는 GUI 환경에서 Stockfish 엔진과 대국할 수 있는 ASCII 기반 체스 프로그램입니다. 플레이어는 SAN 형태로 수를 입력하며, Enemy(Stockfish)와 번갈아 대국합니다.
+
+## 설치 방법 (Installation)
+
+### 자동 설치 (권장)
+1. 다음 명령어로 저장소를 클론합니다:
+   ```bash
+   git clone https://github.com/yourusername/ASCII_Chess.git
+   cd ASCII_Chess
+   ```
+
+2. 관리자 권한으로 `main.py`를 실행합니다:
+   - Windows: `python main.py` (관리자 권한으로 실행)
+   - macOS: `python3 main.py`
+
+   > 💡 Windows에서는 자동으로 관리자 권한을 요청하며, macOS는 기본 설정으로 실행 가능합니다.
+
+### 수동 설치
+#### 1. 필수 패키지 설치
+```bash
+pip install python-chess
+```
+
+#### 2. 폰트 설치 (Windows 전용)
+- `ascii_chess/fonts/menlo-regular.ttf` 파일을 더블클릭하여 설치
+- 또는 Windows 폰트 폴더(`C:\Windows\Fonts\`)에 복사
+
+> **Note for macOS 사용자**
+> - 기본적으로 Menlo 폰트가 설치되어 있으므로 추가 설치가 필요 없습니다.
+
+## 주요 특징
+- 인트로 화면에서 Enemy Elo를 입력 후 게임 시작
+- GUI(기본)와 CLI(`--cli`) 모드 지원
+- `ff`(기권), `quit`(즉시 종료) 명령 지원
+- **UNDO/REDO 기능**: 플레이어와 AI의 수를 되돌리고 다시 실행 가능
+- **HINT 기능**: Stockfish 최고 수준의 분석으로 최선의 수를 추천
+- **반응형 GUI**: 화면 크기에 자동으로 맞춰지며 창 크기 조절 가능
+- Enemy가 둔 마지막 기물을 깜빡임 효과로 강조
+
 ## 주요 기능
 - **Menlo 고정 폭 폰트 강제 사용**: `ascii_chess/fonts/menlo-regular.ttf` 경로에 폰트를 배치하면 프로그램 시작 시 자동 로드됩니다.
 - **인트로 선택 메뉴**: `↑ / ↓` 키로 `Game Start` 또는 `Theme Settings`를 고르고 `Enter`로 확정합니다.
