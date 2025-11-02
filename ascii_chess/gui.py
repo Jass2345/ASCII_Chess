@@ -1434,12 +1434,12 @@ class ChessGUI:
         total_w = board_width + moves_width + padding
         total_h = board_height + padding
 
-        min_w = 700
-        min_h = 500
+        min_w = 1100
+        min_h = 700
 
         self.root.geometry(f"{total_w}x{total_h}")
-        self.root.minsize(total_w, total_h)
-        self.root.maxsize(total_w, total_h)
+        self.root.minsize(min_w, min_h)
+        self.root.maxsize(min_w, min_h)
         self.root.resizable(False, False)
 
     def _bring_to_front(self) -> None:
