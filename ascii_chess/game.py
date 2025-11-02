@@ -12,7 +12,7 @@ from .ai import EngineConfig, StockfishAI
 from .renderer import AsciiRenderer
 
 
-DEFAULT_PROMPT = "Enter move in SAN (e.g. Nf3, O-O, cxd4, ff, help)."
+DEFAULT_PROMPT = "Enter move in SAN (e.g. Nf3, O-O, cxd4, ff, help, hint)."
 
 
 @dataclass
@@ -181,8 +181,9 @@ class GameController:
                     "  quit    - exit the program immediately\n"
                     "  undo    - undo last move (yours and enemy's)\n"
                     "  redo    - redo previously undone move\n"
-                    "  hint    - get best move suggestion from Stockfish\n"
-                    "Enter chess moves in Standard Algebraic Notation (SAN).\n"
+                    "  hint    - 💡 get best move suggestion from Stockfish\n"
+                    "\nEnter chess moves in Standard Algebraic Notation (SAN)."
+                    "\nType 'hint' to get a suggested move from Stockfish.\n"
                 )
                 error_message = ""
                 continue

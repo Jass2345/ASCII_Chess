@@ -244,17 +244,19 @@ class ChessGUI:
         self.submit_button = tk.Button(entry_row, text="Submit", command=self._on_submit)
         self.submit_button.pack(side=tk.LEFT, padx=(6, 0))
 
-        # UNDO / REDO 버튼
+        # UNDO / REDO / HINT 버튼
         button_row = tk.Frame(input_frame)
         button_row.pack(fill=tk.X, pady=(8, 0))
         self.undo_button = tk.Button(button_row, text="Undo (Ctrl+Z)", command=self._on_undo)
         self.undo_button.pack(side=tk.LEFT, padx=(0, 6))
         self.redo_button = tk.Button(button_row, text="Redo (Ctrl+Y)", command=self._on_redo)
-        self.redo_button.pack(side=tk.LEFT)
+        self.redo_button.pack(side=tk.LEFT, padx=(0, 6))
+        self.hint_button = tk.Button(button_row, text="💡 Hint (Ctrl+H)", command=self._get_hint, fg="blue")
+        self.hint_button.pack(side=tk.LEFT)
 
         help_label = tk.Label(
             input_frame,
-            text="Commands: ff, help, quit, undo, redo",
+            text="Commands: ff, help, quit, undo, redo, hint",
             font=STATUS_FONT,
             fg="#777",
         )
@@ -289,6 +291,103 @@ class ChessGUI:
         except tk.TclError as exc:
             raise RuntimeError(f"Failed to load Menlo font from {FONT_PATH}") from exc
 
+    def _get_hint(self) -> None:
+        """Stockfish로부터 힌트를 가져와 표시합니다."""
+        if not hasattr(self, 'board') or self.board.is_game_over():
+            self.status_label.config(text="게임이 종료되었습니다.")
+            return
+            
+        try:
+            # StockfishAI를 통해 최적의 수 가져오기
+            move, san_move = self.ai.get_hint(self.board)
+            from_square = chess.square_name(move.from_square)
+            to_square = chess.square_name(move.to_square)
+            
+            # 상태 표시줄에 힌트 표시
+            self.status_label.config(text=f"💡 힌트: {san_move} ({from_square} → {to_square})")
+            
+            # 이동할 말과 목적지 강조
+            self._highlight_hint_squares([move.from_square, move.to_square])
+            
+        except Exception as e:
+            self.status_label.config(text=f"힌트를 가져오는 중 오류: {str(e)}")
+
+    def _highlight_hint_squares(self, squares: list[int]) -> None:
+        """힌트로 제안된 칸들을 하이라이트합니다."""
+        # 기존 하이라이트 제거
+        self._clear_hint_highlights()
+        
+        # 힌트 사각형 위치 저장
+        self._hint_squares = squares
+        self._hint_blink_visible = True
+        self._hint_blink_remaining = 6  # 3초 동안 (500ms 간격)
+        
+        # 초기 하이라이트 적용
+        self._update_hint_highlight()
+        
+        # 깜빡임 애니메이션 시작
+        self._hint_blink_job = self.root.after(500, self._hint_blink_step)
+        
+        # 3초 후 하이라이트 제거
+        self.root.after(3000, self._clear_hint_highlights)
+        # 3.5초 후에 완전히 정리 (안전을 위해 여유 시간 추가)
+        self.root.after(3500, self._clear_hint_highlights)
+        
+    def _update_hint_highlight(self) -> None:
+        """현재 깜빡임 상태에 따라 힌트 하이라이트를 업데이트합니다."""
+        if not hasattr(self, '_hint_squares') or not self._hint_blink_visible:
+            return
+            
+        for square in self._hint_squares:
+            if 0 <= square < 64:  # 유효한 체스판 위치 확인
+                rank = chess.square_rank(square)
+                file = chess.square_file(square)
+                # 보드 텍스트에서 해당 위치에 태그 추가 (1-based)
+                line = 9 - rank  # 1-based line number
+                # 기물이 있는 위치를 정확히 계산 (보드 텍스트에서의 열 위치)
+                # 각 칸은 3칸을 차지하고, 왼쪽 여백이 2칸 있음
+                col_start = 2 + file * 3 + 1  # 2(왼쪽 여백) + file*3(이전 칸들) + 1(1-based)
+                col_end = col_start + 1  # 기물 한 글자만 하이라이트
+                self.board_text.tag_add("hint", f"{line}.{col_start}", f"{line}.{col_end}")
+    
+    def _hint_blink_step(self) -> None:
+        """힌트 깜빡임 애니메이션 단계를 처리합니다."""
+        if not hasattr(self, '_hint_blink_remaining') or self._hint_blink_remaining <= 0:
+            self._hint_blink_job = None
+            return
+            
+        self._hint_blink_visible = not self._hint_blink_visible
+        self._hint_blink_remaining -= 1
+        
+        # 현재 깜빡임 상태에 따라 하이라이트 업데이트
+        self._clear_hint_highlights()
+        if self._hint_blink_visible:
+            self._update_hint_highlight()
+            
+        # 다음 깜빡임 예약
+        if self._hint_blink_remaining > 0:
+            self._hint_blink_job = self.root.after(500, self._hint_blink_step)
+        else:
+            self._hint_blink_job = None
+
+    def _clear_hint_highlights(self) -> None:
+        """힌트 하이라이트를 제거합니다."""
+        if hasattr(self, 'board_text'):
+            self.board_text.tag_remove("hint", "1.0", tk.END)
+            
+    def _clear_highlights(self) -> None:
+        """모든 하이라이트를 제거합니다."""
+        self._clear_hint_highlights()
+        if hasattr(self, '_hint_blink_job') and self._hint_blink_job is not None:
+            try:
+                self.root.after_cancel(self._hint_blink_job)
+            except tk.TclError:
+                pass
+            self._hint_blink_job = None
+            
+        if hasattr(self, '_hint_squares'):
+            delattr(self, '_hint_squares')
+
     def _apply_global_font(self) -> None:
         targets = (
             "TkDefaultFont",
@@ -307,6 +406,8 @@ class ChessGUI:
     def _setup_keybindings(self) -> None:
         self.root.bind("<Control-z>", lambda e: self._on_undo())
         self.root.bind("<Control-y>", lambda e: self._on_redo())
+        self.root.bind("<Control-h>", lambda e: self._get_hint())
+        self.root.bind("<Control-H>", lambda e: self._get_hint())
         self.root.bind("<Escape>", self._handle_escape)
 
     def _show_intro_screen(self) -> None:
@@ -767,18 +868,22 @@ class ChessGUI:
     def _handle_player_input(self, user_input: str) -> None:
         # 특수 명령과 SAN 입력을 판별하여 처리한다
         lowered = user_input.lower()
-        if lowered in {"/win", "/lose", "/draw"}:
-            outcome = lowered[1:]
-            self._handle_forced_outcome(outcome)
+        if lowered in {"ff", "help", "quit", "undo", "redo", "hint"}:
+            command = lowered
+        else:
+            command = None
+        if command == "hint":
+            self._get_hint()
             return
-        if lowered == "help":
+        if command == "help":
             messagebox.showinfo(
                 "Help",
                 "Enter chess moves in SAN (e.g. Nf3, O-O, cxd4).\n"
                 "Commands:\n  ff     - forfeit the game\n"
                 "  quit   - exit the application\n"
                 "  undo   - undo last pair of moves (Ctrl+Z)\n"
-                "  redo   - redo last pair of moves (Ctrl+Y)",
+                "  redo   - redo last pair of moves (Ctrl+Y)\n"
+                "  hint   - get a suggested move (Ctrl+H)",
                 parent=self.root,
             )
             return
@@ -1015,6 +1120,7 @@ class ChessGUI:
         self.board_text.tag_configure("square_dark", background=board_theme.dark_color)
         self.board_text.tag_configure("piece_white", foreground=piece_theme.white_color)
         self.board_text.tag_configure("piece_black", foreground=piece_theme.black_color)
+        self.board_text.tag_configure("hint", background="#ffeb3b", foreground="#000")
 
         for tag in ("square_light", "square_dark", "piece_white", "piece_black"):
             self.board_text.tag_remove(tag, "1.0", tk.END)
