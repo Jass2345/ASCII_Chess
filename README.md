@@ -1,16 +1,21 @@
 # ASCII Chess
 
-Menlo 고정폭 폰트와 Stockfish 엔진을 기반으로 플레이하는 Tkinter GUI 체스 애플리케이션입니다. 인트로 화면에서 `Game Start`/`Theme Settings` 중 하나를 선택하고, 게임 중에는 SAN 표기(SAN move notation)로 수를 입력해 진행합니다.
+HANNAM Univ. Embedded system Fall - Vibe coding / team. holycow
+20222328 윤여명
+20222305 지민우
+20222319 정재석
+
+Stockfish 엔진 기반의 봇을 상대로 플레이하는 Tkinter GUI 체스 프로그램입니다. SAN 표기(SAN move notation)로 수를 입력해 게임을 진행합니다.
 
 ## 요구 사항
 - Python 3.10 이상
 - `pip install python-chess`
 - Stockfish 엔진 실행 파일
-- `ascii_chess/fonts/menlo-regular.ttf` (Windows 사용자는 직접 복사 또는 설치 필요)
+- `ascii_chess/fonts/menlo-regular.ttf`
 
 ## Stockfish 준비
 1. [Stockfish 공식 사이트](https://stockfishchess.org/download/)에서 운영체제에 맞는 패키지를 내려받습니다.
-2. 압축을 해제한 뒤 실행 파일이 포함된 폴더 전체를 `engines/stockfish/` 경로로 복사합니다.  
+2. 압축을 해제한 뒤 실행 파일이 포함된 폴더 전체를 `engines/` 경로에 `stockfish/` 이름으로 복사합니다.  
    ```text
    ASCII_Chess/
      engines/
@@ -23,25 +28,25 @@ Menlo 고정폭 폰트와 Stockfish 엔진을 기반으로 플레이하는 Tkint
 ## 실행 방법
 ```bash
 python main.py [옵션]
+or
+python3 main.py [옵션]
 ```
 
 ### 옵션
 - `--engine-path /path/to/stockfish` : 수동으로 엔진 경로 지정 (지정하지 않으면 `engines/stockfish/` 및 하위 항목을 자동 탐색)
-- `--think-time 1.0` : Stockfish 한 수당 기본 사고 시간(초)
 - `--ascii-only` : 유니코드 대신 ASCII 기물 사용
-- `--min-rating / --max-rating` : 허용 Elo 범위 재설정
 - `--no-auto-install` : `python-chess` 자동 설치 시도 비활성화
 
 ## 조작 요약
 - 인트로 화면: `↑ / ↓`로 메뉴 이동, `Enter`로 선택
 - 테마 설정: `Enter`로 세부 항목 진입, `Esc`로 이전 화면 복귀
-- 게임 시작 순서: Enemy Elo 입력 → 시간 모드 번호(1: 10분, 2: 3분, 3: 무제한) 선택
+- 게임 시작 순서: Enemy Elo 입력 → 게임 모드 선택[1: Rapid(10분), 2: Blitz(3분), 3: Practice(무제한)] 선택
 - 게임 중 명령어  
   - 일반 수: SAN 표기(`Nf3`, `O-O`, `cxd4` 등)  
   - `ff`: 즉시 기권  
   - `quit`: 프로그램 종료  
   - `undo` / `redo`: 직전 양측 수 되돌리기 / 다시 실행  
-  - `hint`: 추천 수 요청 (해당 칸이 붉은색으로 점멸)
+  - `hint`: 엔진 기반 최선의 수 제안 (해당 칸이 붉은색으로 점멸)
 
 ## 프로젝트 구조
 - `main.py` : 실행 진입점 및 의존성 확인
