@@ -9,17 +9,46 @@ from typing import List, Optional
 
 try:
     import chess
-except ImportError:  # pragma: no cover - handled by dependency check in main
-    chess = None  # type: ignore
+except ImportError:
+    chess = None
 
 from .ai import EngineConfig, StockfishAI
-from .renderer import ASCII_PIECES, LIGHT_SQUARE, DARK_SQUARE, UNICODE_PIECES
 
+# ===== 기본 상수 =====
 MENLO_FONT_NAME = "Menlo"
 FONT_DIR = Path(__file__).resolve().parent / "fonts"
 FONT_PATH = FONT_DIR / "menlo-regular.ttf"
 
-# 고정폭 폰트 사용으로 체크판 자간 정렬
+UNICODE_PIECES = {
+    "P": "♙",
+    "N": "♘",
+    "B": "♗",
+    "R": "♖",
+    "Q": "♕",
+    "K": "♔",
+    "p": "♟",
+    "n": "♞",
+    "b": "♝",
+    "r": "♜",
+    "q": "♛",
+    "k": "♚",
+}
+
+ASCII_PIECES = {
+    "P": "P",
+    "N": "N",
+    "B": "B",
+    "R": "R",
+    "Q": "Q",
+    "K": "K",
+    "p": "p",
+    "n": "n",
+    "b": "b",
+    "r": "r",
+    "q": "q",
+    "k": "k",
+}
+
 BOARD_FONT = (MENLO_FONT_NAME, 30)
 MOVE_FONT = (MENLO_FONT_NAME, 12)
 STATUS_FONT = (MENLO_FONT_NAME, 11)
@@ -28,13 +57,14 @@ PROMPT_FONT = (MENLO_FONT_NAME, 11)
 ENEMY_BASE_COLOR = "#888"
 ENEMY_HIGHLIGHT_COLOR = "#ffcc33"
 ENEMY_BLINK_INTERVAL_MS = 350
-ENEMY_BLINK_TOGGLES = 6  # 점멸 횟수 (약 세 번)
+ENEMY_BLINK_TOGGLES = 6
 
 CELL_WIDTH = 3
 EDGE_LABEL_WIDTH = 2
 LISTBOX_WIDTH = 18
 
 
+# ===== 테마 데이터 =====
 @dataclass(frozen=True)
 class BoardTheme:
     name: str
@@ -64,6 +94,7 @@ FALLBACK_BOARD_THEME = DEFAULT_BOARD_THEMES[0]
 FALLBACK_PIECE_COLOR = DEFAULT_PIECE_COLORS[0]
 
 
+# ===== GUI 클래스 =====
 class ChessGUI:
     def __init__(self, root: tk.Tk, engine_config: EngineConfig, use_unicode: bool = True) -> None:
         if chess is None:
@@ -93,8 +124,7 @@ class ChessGUI:
         self._focus_binding: Optional[str] = None
         self._closing = False
 
-        # 타이머 상태
-        self.time_mode: Optional[int] = None  # 1=10분, 2=3분, 3=무제한
+        self.time_mode: Optional[int] = None
         self.initial_seconds: int = 0
         self.player_time_left: int = 0
         self.enemy_time_left: int = 0
@@ -128,6 +158,7 @@ class ChessGUI:
         self._shortcuts_enabled = True
         self._hint_enabled = True
         self._timers_visible = True
+        self._hint_clear_job: Optional[int] = None
 
         self._build_widgets()
         self._configure_geometry()
@@ -136,13 +167,12 @@ class ChessGUI:
         self.root.bind("<Configure>", self._on_root_configure, add=True)
         self._show_intro_screen()
 
+    # ===== 위젯 구성 =====
     def _build_widgets(self) -> None:
-        # 보드 영역과 기보·입력 영역을 초기화한다
         main_frame = tk.Frame(self.root, padx=12, pady=12)
         main_frame.pack(fill=tk.BOTH, expand=True)
         self.main_frame = main_frame
 
-        # 보드 텍스트 위젯 구성
         board_container = tk.Frame(main_frame)
         board_container.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 12))
 
@@ -228,7 +258,6 @@ class ChessGUI:
         )
         self.enemy_label.pack(anchor="e", fill=tk.X, pady=(4, 8))
 
-        # 타이머 라벨 (기보 입력 위에 작게 표시)
         timers_row = tk.Frame(input_frame)
         timers_row.pack(fill=tk.X, pady=(0, 4))
         self.timers_row = timers_row
@@ -254,12 +283,12 @@ class ChessGUI:
         help_label.pack(anchor="w", pady=(8, 0))
         self.help_label = help_label
 
-        # 레이아웃 비중 설정
         main_frame.columnconfigure(0, weight=3)
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(0, weight=3)
         main_frame.rowconfigure(1, weight=1)
 
+    # ===== 폰트 설정 =====
     def _ensure_menlo_font(self) -> None:
         existing = {name.lower() for name in tkfont.families()}
         if MENLO_FONT_NAME.lower() in existing:
@@ -282,8 +311,8 @@ class ChessGUI:
         except tk.TclError as exc:
             raise RuntimeError(f"Failed to load Menlo font from {FONT_PATH}") from exc
 
+    # ===== 힌트 처리 =====
     def _get_hint(self) -> None:
-        """Stockfish로부터 힌트를 가져와 표시합니다."""
         if not self._hint_enabled or self.mode != "game":
             self.status_label.config(text="Hints can only be used during the game.")
             return
@@ -292,88 +321,79 @@ class ChessGUI:
             return
             
         try:
-            # StockfishAI를 통해 최적의 수 가져오기
             move, san_move = self.ai.get_hint(self.board)
             from_square = chess.square_name(move.from_square)
             to_square = chess.square_name(move.to_square)
             
-            # 상태 표시줄에 힌트 표시
-            self.status_label.config(text=f"💡 힌트: {san_move} ({from_square} → {to_square})")
+            self.status_label.config(text=f"💡 Hint: {san_move} ({from_square} → {to_square})")
             
-            # 이동할 말과 목적지 강조
             self._highlight_hint_squares([move.from_square, move.to_square])
             
-        except Exception as e:
-            self.status_label.config(text=f"힌트를 가져오는 중 오류: {str(e)}")
+        except Exception as exc:
+            self.status_label.config(text=f"Failed to retrieve hint: {exc}")
 
     def _highlight_hint_squares(self, squares: list[int]) -> None:
-        """힌트로 제안된 칸들을 하이라이트합니다."""
-        # 기존 하이라이트 제거
         self._clear_hint_highlights()
-        
-        # 힌트 사각형 위치 저장
         self._hint_squares = squares
         self._hint_blink_visible = True
-        self._hint_blink_remaining = 6  # 3초 동안 (500ms 간격)
-        
-        # 초기 하이라이트 적용
+        self._hint_blink_remaining = 6
         self._update_hint_highlight()
-        
-        # 깜빡임 애니메이션 시작
         self._hint_blink_job = self.root.after(500, self._hint_blink_step)
-        
-        # 3초 후 하이라이트 제거
-        self.root.after(3000, self._clear_hint_highlights)
-        # 3.5초 후에 완전히 정리 (안전을 위해 여유 시간 추가)
-        self.root.after(3500, self._clear_hint_highlights)
-        
+        if self._hint_clear_job is not None:
+            try:
+                self.root.after_cancel(self._hint_clear_job)
+            except tk.TclError:
+                pass
+        self._hint_clear_job = self.root.after(3500, self._clear_hint_highlights)
+
     def _update_hint_highlight(self) -> None:
-        """현재 깜빡임 상태에 따라 힌트 하이라이트를 업데이트합니다."""
         if not hasattr(self, '_hint_squares') or not self._hint_blink_visible:
             return
-            
+
         for square in self._hint_squares:
-            if 0 <= square < 64:  # 유효한 체스판 위치 확인
+            if 0 <= square < 64:
                 rank = chess.square_rank(square)
                 file = chess.square_file(square)
-                # 보드 텍스트에서 해당 위치에 태그 추가 (1-based)
-                line = 9 - rank  # 1-based line number
-                # 각 칸은 CELL_WIDTH 문자, 앞쪽에 EDGE_LABEL_WIDTH만큼 좌표 문자가 있다
+                line = 9 - rank
                 col_start = EDGE_LABEL_WIDTH + file * CELL_WIDTH
                 col_end = col_start + CELL_WIDTH
                 start_index = f"{line}.{col_start}"
                 end_index = f"{line}.{col_end}"
                 self.board_text.tag_add("hint_square", start_index, end_index)
                 self.board_text.tag_add("hint_piece", start_index, end_index)
-    
+
     def _hint_blink_step(self) -> None:
-        """힌트 깜빡임 애니메이션 단계를 처리합니다."""
         if not hasattr(self, '_hint_blink_remaining') or self._hint_blink_remaining <= 0:
             self._hint_blink_job = None
+            self._clear_hint_highlights()
             return
-            
         self._hint_blink_visible = not self._hint_blink_visible
         self._hint_blink_remaining -= 1
-        
-        # 현재 깜빡임 상태에 따라 하이라이트 업데이트
-        self._clear_hint_highlights()
         if self._hint_blink_visible:
             self._update_hint_highlight()
-            
-        # 다음 깜빡임 예약
+        else:
+            self._remove_hint_tags()
+
         if self._hint_blink_remaining > 0:
             self._hint_blink_job = self.root.after(500, self._hint_blink_step)
         else:
             self._hint_blink_job = None
 
-    def _clear_hint_highlights(self) -> None:
-        """힌트 하이라이트를 제거합니다."""
+    def _remove_hint_tags(self) -> None:
         if hasattr(self, "board_text"):
             self.board_text.tag_remove("hint_square", "1.0", tk.END)
             self.board_text.tag_remove("hint_piece", "1.0", tk.END)
-            
+
+    def _clear_hint_highlights(self) -> None:
+        if self._hint_clear_job is not None:
+            try:
+                self.root.after_cancel(self._hint_clear_job)
+            except tk.TclError:
+                pass
+            self._hint_clear_job = None
+        self._remove_hint_tags()
+
     def _clear_highlights(self) -> None:
-        """모든 하이라이트를 제거합니다."""
         self._clear_hint_highlights()
         if hasattr(self, '_hint_blink_job') and self._hint_blink_job is not None:
             try:
@@ -409,8 +429,8 @@ class ChessGUI:
         self._get_hint()
         return "break"
 
+    # ===== 인트로 화면 =====
     def _show_intro_screen(self) -> None:
-        # 인트로 화면을 표시하고 엔터 입력을 기다린다
         self.mode = "intro"
         if hasattr(self, "move_entry"):
             try:
@@ -573,6 +593,7 @@ class ChessGUI:
             return "break"
         return None
 
+    # ===== 테마 메뉴 =====
     def _enter_theme_settings(self) -> None:
         if self.mode in {"theme_menu", "theme_detail"}:
             return
@@ -595,7 +616,7 @@ class ChessGUI:
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         self.mode = "theme_menu"
         self.moves_label.config(text="Theme Settings")
-        self.status_label.config(text="Select a theme option.")
+        self.status_label.config(text="Choose a theme option.")
         self.enemy_label.config(text="Enter: Select option / Esc: back to the main", fg=ENEMY_BASE_COLOR)
         self.move_entry.delete(0, tk.END)
         self.move_entry.configure(state=tk.DISABLED)
@@ -688,7 +709,7 @@ class ChessGUI:
         self.theme_listbox.focus_set()
 
         self.moves_label.config(text="Theme Settings")
-        self.status_label.config(text="테마 설정 항목을\n선택하세요.")
+        self.status_label.config(text="Choose a theme option.")
         self.enemy_label.config(text="Enter: Select option / Esc: Back to the main", fg=ENEMY_BASE_COLOR)
         self.theme_info_label.config(
             text="Use the ↑/↓ arrow keys to navigate and press Enter to open the selected option.\n"
@@ -805,8 +826,8 @@ class ChessGUI:
             return "break"
         return "break"
 
+    # ===== 게임 준비 =====
     def _start_game_from_intro(self, event: tk.Event | None = None) -> None:
-        # 인트로 종료 후 기본 판과 입력 상태를 세팅한다
         if self.mode != "intro" or not hasattr(self, "intro_frame"):
             return
         self._teardown_intro_bindings()
@@ -843,7 +864,6 @@ class ChessGUI:
         rating = max(self.engine_config.min_rating, min(rating, self.engine_config.max_rating))
         self.move_entry.delete(0, tk.END)
         self.ai.set_rating(rating)
-        # 시간 모드 선택 단계로 이동
         self.mode = "time_select"
         self.status_label.config(text="Select game mode\n (1:Rapid 2:Blitz 3:Practice)")
         self.enemy_label.config(text="Enemy: Ready", fg=ENEMY_BASE_COLOR)
@@ -876,8 +896,8 @@ class ChessGUI:
         self._render()
         self._start_timer_tick()
 
+    # ===== 게임 진행 =====
     def _on_submit(self, event: Optional[tk.Event] = None) -> None:
-        # 현재 입력 값에 따라 명령 또는 수를 처리한다
         text = self.move_entry.get().strip()
         if not text:
             return
@@ -889,7 +909,6 @@ class ChessGUI:
         self._handle_player_input(text)
 
     def _handle_player_input(self, user_input: str) -> None:
-        # 특수 명령과 SAN 입력을 판별하여 처리한다
         lowered = user_input.lower()
         if lowered in {"ff", "help", "quit", "undo", "redo", "hint"}:
             command = lowered
@@ -962,11 +981,9 @@ class ChessGUI:
         self._schedule_ai_move()
 
     def _play_ai_move(self) -> None:
-        # Enemy가 수를 계산해 둔 뒤 화면과 상태를 갱신한다
         try:
-            # 엔진 호출 자체는 짧게, 전체 지연은 스케줄러에서 처리
             ai_move = self.ai.choose_move(self.board, think_time=0.05)
-        except Exception as exc:  # pragma: no cover - engine errors are unexpected
+        except Exception as exc:
             messagebox.showerror("Engine error", str(exc), parent=self.root)
             self._awaiting_ai = False
             self._ai_job = None
@@ -987,7 +1004,6 @@ class ChessGUI:
             self._announce_result()
 
     def _schedule_ai_move(self) -> None:
-        # 현재 포지션 난이도를 추정하여 가변 지연 후 AI 수를 두도록 예약한다
         delay_s = self._estimate_position_difficulty() * self._elo_delay_scale()
         delay_ms = max(50, int(min(4.0, delay_s) * 1000))
         if self._ai_job is not None:
@@ -999,7 +1015,6 @@ class ChessGUI:
         self._ai_job = self.root.after(delay_ms, self._play_ai_move)
 
     def _estimate_position_difficulty(self) -> float:
-        # 간단한 휴리스틱: 합법 수 개수와 체크 여부 기반, 약간의 랜덤성
         try:
             import random
             legal_count = sum(1 for _ in self.board.legal_moves)
@@ -1012,7 +1027,6 @@ class ChessGUI:
             return 0.8
 
     def _elo_delay_scale(self) -> float:
-        # Elo가 낮을수록 더 오래 생각(스케일 > 1), 높을수록 더 빨리(스케일 < 1)
         try:
             r = getattr(self.ai, "rating", 1500)
             rmin = getattr(self.engine_config, "min_rating", 1350)
@@ -1021,14 +1035,13 @@ class ChessGUI:
                 return 1.0
             t = (r - rmin) / (rmax - rmin)
             t = max(0.0, min(1.0, t))
-            slow, fast = 1.8, 0.6  # 낮은 Elo일수록 1.8배, 높은 Elo일수록 0.6배
+            slow, fast = 1.8, 0.6
             scale = slow + (fast - slow) * t
             return max(0.5, min(2.0, scale))
         except Exception:
             return 1.0
 
     def _handle_forced_outcome(self, outcome: str) -> None:
-        # 개발자 테스트 명령으로 강제 종료 시 메시지를 출력한다
         self._cancel_timer()
         self._stop_enemy_blink()
         mapping = {
@@ -1047,7 +1060,6 @@ class ChessGUI:
             self._return_to_intro()
 
     def _announce_result(self) -> None:
-        # 실제 대국 결과를 팝업으로 알리고 재도전을 묻는다
         self._cancel_timer()
         outcome = self.board.outcome(claim_draw=True)
         if outcome is None:
@@ -1109,7 +1121,6 @@ class ChessGUI:
         self._show_intro_screen()
 
     def _reset_game(self) -> None:
-        # 새 대국을 시작하기 위한 상태 초기화
         self.board = chess.Board()
         self.move_history.clear()
         self.undo_stack = [self.board.fen()]
@@ -1131,13 +1142,12 @@ class ChessGUI:
                 pass
             self._ai_job = None
         self._render()
-        # 선택된 시간 모드로 타이머 초기화 및 시작
         if self.time_mode is not None:
             self._apply_time_mode(self.time_mode)
             self._start_timer_tick()
 
+    # ===== 화면 갱신 =====
     def _render(self) -> None:
-        # 보드와 기보 텍스트를 최신 상태로 갱신한다
         if self._is_rendering:
             return
         self._is_rendering = True
@@ -1183,7 +1193,7 @@ class ChessGUI:
             return
 
         for rank_offset in range(8):
-            line_number = rank_offset + 2  # header occupies line 1
+            line_number = rank_offset + 2
             rank_idx = 7 - rank_offset
             for file_idx in range(8):
                 start_col = EDGE_LABEL_WIDTH + file_idx * CELL_WIDTH
@@ -1218,7 +1228,6 @@ class ChessGUI:
         return self.piece_color_themes[index]
 
     def _board_to_text(self, board: "chess.Board") -> str:
-        # 보드 상태를 텍스트 행렬로 변환한다
         header_cells = [chr(ord("a") + file).center(CELL_WIDTH) for file in range(8)]
         header = " " * EDGE_LABEL_WIDTH + "".join(header_cells)
         lines = [header]
@@ -1308,7 +1317,6 @@ class ChessGUI:
             self._render()
 
     def _exit_game(self) -> None:
-        # 창을 안전하게 종료하며 모든 예약 작업을 정리한다
         if self._closing:
             return
         self._closing = True
@@ -1334,7 +1342,7 @@ class ChessGUI:
         except tk.TclError:
             pass
 
-    # ===== 타이머 로직 =====
+    # ===== 타이머 =====
     def _apply_time_mode(self, mode: int) -> None:
         self.time_mode = mode
         if mode == 1:
@@ -1342,7 +1350,7 @@ class ChessGUI:
         elif mode == 2:
             self.initial_seconds = 3 * 60
         else:
-            self.initial_seconds = 0  # 무제한
+            self.initial_seconds = 0
 
         if self.initial_seconds > 0:
             self.player_time_left = self.initial_seconds
@@ -1363,7 +1371,7 @@ class ChessGUI:
     def _start_timer_tick(self) -> None:
         self._cancel_timer()
         if self.initial_seconds == 0:
-            return  # 무제한
+            return
         self._timer_job = self.root.after(1000, self._timer_tick)
 
     def _timer_tick(self) -> None:
@@ -1372,7 +1380,6 @@ class ChessGUI:
             return
         if self.initial_seconds == 0:
             return
-        # 누구 차례인지에 따라 감소
         if self._awaiting_ai:
             self.enemy_time_left -= 1
             if self.enemy_time_left <= 0:
@@ -1380,7 +1387,6 @@ class ChessGUI:
                 self.enemy_timer_label.config(text=f"Enemy: {self._fmt_time(self.enemy_time_left)}")
                 self.status_label.config(text="Enemy flag fell. Player wins!")
                 messagebox.showinfo("Time over", "Enemy flag fell. Player wins!", parent=self.root)
-                # 예약된 AI 동작이 있으면 취소
                 if self._ai_job is not None:
                     try:
                         self.root.after_cancel(self._ai_job)
@@ -1397,7 +1403,6 @@ class ChessGUI:
                 self.player_timer_label.config(text=f"You: {self._fmt_time(self.player_time_left)}")
                 self.status_label.config(text="Player flag fell. Enemy wins!")
                 messagebox.showinfo("Time over", "Player flag fell. Enemy wins!", parent=self.root)
-                # 예약된 AI 동작이 있으면 취소
                 if self._ai_job is not None:
                     try:
                         self.root.after_cancel(self._ai_job)
@@ -1408,10 +1413,8 @@ class ChessGUI:
                 self._ask_play_again()
                 return
 
-        # 라벨 갱신
         self.player_timer_label.config(text=f"You: {self._fmt_time(self.player_time_left)}")
         self.enemy_timer_label.config(text=f"Enemy: {self._fmt_time(self.enemy_time_left)}")
-        # 다음 틱 예약
         self._timer_job = self.root.after(1000, self._timer_tick)
 
     def _cancel_timer(self) -> None:
@@ -1422,8 +1425,8 @@ class ChessGUI:
                 pass
             self._timer_job = None
 
+    # ===== 창 제어 =====
     def _configure_geometry(self) -> None:
-        # 기본 창 크기를 계산하고 최소 크기를 설정한다
         board_width = 33 * 20
         board_height = 15 * 36
         moves_width = 150
@@ -1460,6 +1463,7 @@ class ChessGUI:
                     pass
                 self._focus_binding = None
 
+    # ===== 이동 되돌리기 =====
     def _on_undo(self) -> None:
         if self.mode != "game":
             self.status_label.config(text="Undo is only available during the game.")
@@ -1473,14 +1477,12 @@ class ChessGUI:
 
         self._stop_enemy_blink()
 
-        # Undo AI move
         ai_san = self.move_history.pop()
         self.redo_stack.append(ai_san)
         self.board.pop()
         if self.undo_stack:
             self.undo_stack.pop()
 
-        # Undo player move
         player_san = self.move_history.pop()
         self.redo_stack.append(player_san)
         self.board.pop()
@@ -1507,7 +1509,6 @@ class ChessGUI:
 
         self._stop_enemy_blink()
 
-        # Redo player move (last appended)
         player_san = self.redo_stack.pop()
         try:
             player_move = self.board.parse_san(player_san)
@@ -1519,7 +1520,6 @@ class ChessGUI:
         self.move_history.append(player_san)
         self.undo_stack.append(self.board.fen())
 
-        # Redo AI move
         ai_san = self.redo_stack.pop()
         try:
             ai_move = self.board.parse_san(ai_san)

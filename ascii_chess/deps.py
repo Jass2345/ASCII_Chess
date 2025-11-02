@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import os
 import platform
 import shutil
@@ -9,15 +10,17 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+# ===== 의존성 상태 =====
 @dataclass
 class DependencyStatus:
     python_chess_ok: bool
     stockfish_path: Optional[str]
 
 
+# ===== python-chess 확인 =====
 def ensure_python_chess(auto_install: bool = True) -> bool:
     try:
-        import chess  # noqa: F401
+        importlib.import_module("chess")
         return True
     except ModuleNotFoundError:
         if not auto_install:
@@ -41,12 +44,13 @@ def _attempt_install_python_chess() -> bool:
         sys.stderr.write(result.stderr)
         return False
     try:
-        import chess  # noqa: F401
+        importlib.import_module("chess")
     except ModuleNotFoundError:
         return False
     return True
 
 
+# ===== 스톡피시 탐색 =====
 def locate_stockfish(explicit_path: Optional[str]) -> Optional[str]:
     if explicit_path:
         resolved = _resolve_candidate(explicit_path)
@@ -72,7 +76,6 @@ def _resolve_candidate(path: str) -> Optional[str]:
     if os.path.isfile(expanded):
         if _is_executable(expanded):
             return expanded
-        # Allow `.exe` even if `os.X_OK` is False on Windows filesystems.
         if expanded.lower().endswith(".exe") and sys.platform.startswith("win"):
             return expanded
     located = shutil.which(expanded)
@@ -115,6 +118,7 @@ def _bundled_candidates() -> list[str]:
     return [os.path.join(base_dir, name) for name in names]
 
 
+# ===== 종합 결과 =====
 def collect_dependency_status(engine_path: Optional[str], auto_install: bool = True) -> DependencyStatus:
     python_chess_ok = ensure_python_chess(auto_install=auto_install)
     stockfish_path = locate_stockfish(engine_path)
