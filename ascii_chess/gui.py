@@ -338,11 +338,13 @@ class ChessGUI:
                 file = chess.square_file(square)
                 # 보드 텍스트에서 해당 위치에 태그 추가 (1-based)
                 line = 9 - rank  # 1-based line number
-                # 기물이 있는 위치를 정확히 계산 (보드 텍스트에서의 열 위치)
-                # 각 칸은 3칸을 차지하고, 왼쪽 여백이 2칸 있음
-                col_start = 2 + file * 3 + 1  # 2(왼쪽 여백) + file*3(이전 칸들) + 1(1-based)
-                col_end = col_start + 1  # 기물 한 글자만 하이라이트
-                self.board_text.tag_add("hint", f"{line}.{col_start}", f"{line}.{col_end}")
+                # 각 칸은 CELL_WIDTH 문자, 앞쪽에 EDGE_LABEL_WIDTH만큼 좌표 문자가 있다
+                col_start = EDGE_LABEL_WIDTH + file * CELL_WIDTH
+                col_end = col_start + CELL_WIDTH
+                start_index = f"{line}.{col_start}"
+                end_index = f"{line}.{col_end}"
+                self.board_text.tag_add("hint_square", start_index, end_index)
+                self.board_text.tag_add("hint_piece", start_index, end_index)
     
     def _hint_blink_step(self) -> None:
         """힌트 깜빡임 애니메이션 단계를 처리합니다."""
@@ -366,8 +368,9 @@ class ChessGUI:
 
     def _clear_hint_highlights(self) -> None:
         """힌트 하이라이트를 제거합니다."""
-        if hasattr(self, 'board_text'):
-            self.board_text.tag_remove("hint", "1.0", tk.END)
+        if hasattr(self, "board_text"):
+            self.board_text.tag_remove("hint_square", "1.0", tk.END)
+            self.board_text.tag_remove("hint_piece", "1.0", tk.END)
             
     def _clear_highlights(self) -> None:
         """모든 하이라이트를 제거합니다."""
@@ -398,23 +401,7 @@ class ChessGUI:
                 continue
 
     def _setup_keybindings(self) -> None:
-        self.root.bind("<Control-z>", self._handle_undo_shortcut)
-        self.root.bind("<Control-y>", self._handle_redo_shortcut)
-        self.root.bind("<Control-h>", self._handle_hint_shortcut)
-        self.root.bind("<Control-H>", self._handle_hint_shortcut)
         self.root.bind("<Escape>", self._handle_escape)
-
-    def _handle_undo_shortcut(self, event: tk.Event | None = None):
-        if not self._shortcuts_enabled:
-            return "break"
-        self._on_undo()
-        return "break"
-
-    def _handle_redo_shortcut(self, event: tk.Event | None = None):
-        if not self._shortcuts_enabled:
-            return "break"
-        self._on_redo()
-        return "break"
 
     def _handle_hint_shortcut(self, event: tk.Event | None = None):
         if not self._shortcuts_enabled or not self._hint_enabled:
@@ -917,9 +904,9 @@ class ChessGUI:
                 "Enter chess moves in SAN (e.g. Nf3, O-O, cxd4).\n"
                 "Commands:\n  ff     - forfeit the game\n"
                 "  quit   - exit the application\n"
-                "  undo   - undo last pair of moves (Ctrl+Z)\n"
-                "  redo   - redo last pair of moves (Ctrl+Y)\n"
-                "  hint   - get a suggested move (Ctrl+H)",
+                "  undo   - undo last pair of moves\n"
+                "  redo   - redo last pair of moves\n"
+                "  hint   - get a suggested move",
                 parent=self.root,
             )
             return
@@ -1186,9 +1173,10 @@ class ChessGUI:
         self.board_text.tag_configure("square_dark", background=board_theme.dark_color)
         self.board_text.tag_configure("piece_white", foreground=piece_theme.white_color)
         self.board_text.tag_configure("piece_black", foreground=piece_theme.black_color)
-        self.board_text.tag_configure("hint", background="#ffeb3b", foreground="#000")
+        self.board_text.tag_configure("hint_square", background="#ff4d4d")
+        self.board_text.tag_configure("hint_piece", foreground="#b30000")
 
-        for tag in ("square_light", "square_dark", "piece_white", "piece_black"):
+        for tag in ("square_light", "square_dark", "piece_white", "piece_black", "hint_square", "hint_piece"):
             self.board_text.tag_remove(tag, "1.0", tk.END)
 
         if len(board_lines) < 9:
