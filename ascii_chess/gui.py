@@ -285,10 +285,10 @@ class ChessGUI:
     def _get_hint(self) -> None:
         """Stockfish로부터 힌트를 가져와 표시합니다."""
         if not self._hint_enabled or self.mode != "game":
-            self.status_label.config(text="힌트는 게임 중에만 사용할 수 있습니다.")
+            self.status_label.config(text="Hints can only be used during the game.")
             return
         if not hasattr(self, 'board') or self.board.is_game_over():
-            self.status_label.config(text="게임이 종료되었습니다.")
+            self.status_label.config(text="The game has ended.")
             return
             
         try:
@@ -562,7 +562,7 @@ class ChessGUI:
 
     def _handle_escape(self, event: tk.Event | None = None):
         if self.mode == "intro":
-            if messagebox.askyesno("Exit", "정말 프로그램을 종료할까요?", parent=self.root):
+            if messagebox.askyesno("Exit", "Exit the game?", parent=self.root):
                 self._exit_game()
             return "break"
         if self.mode == "theme_detail":
@@ -595,8 +595,8 @@ class ChessGUI:
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         self.mode = "theme_menu"
         self.moves_label.config(text="Theme Settings")
-        self.status_label.config(text="테마 옵션을 선택하세요.")
-        self.enemy_label.config(text="Enter: 옵션 열기 / Esc: 첫 화면", fg=ENEMY_BASE_COLOR)
+        self.status_label.config(text="Select a theme option.")
+        self.enemy_label.config(text="Enter: Select option / Esc: back to the main", fg=ENEMY_BASE_COLOR)
         self.move_entry.delete(0, tk.END)
         self.move_entry.configure(state=tk.DISABLED)
         self.entry_row.pack_forget()
@@ -689,11 +689,11 @@ class ChessGUI:
 
         self.moves_label.config(text="Theme Settings")
         self.status_label.config(text="테마 설정 항목을\n선택하세요.")
-        self.enemy_label.config(text="Enter: 옵션 열기 / Esc: 첫 화면", fg=ENEMY_BASE_COLOR)
+        self.enemy_label.config(text="Enter: Select option / Esc: Back to the main", fg=ENEMY_BASE_COLOR)
         self.theme_info_label.config(
-            text="위/아래 방향키로 이동하고 Enter로 해당 옵션을 엽니다.\n"
-            "Board Color: 보드 배경 색상 조합\n"
-            "Piece Color: 흑/백 기물 색상 지정"
+            text="Use the ↑/↓ arrow keys to navigate and press Enter to open the selected option.\n"
+            "Board Color: Board background config\n"
+            "Piece Color: Piece color config"
         )
         self._update_theme_info_wraplength()
         self._render()
@@ -719,9 +719,9 @@ class ChessGUI:
                 self.theme_listbox.insert(tk.END, theme.name)
             if themes:
                 self.preview_board_theme = themes[selected_index]
-            self.status_label.config(text="Board Color -\n적용할 색상 세트를\n선택하세요.")
+            self.status_label.config(text="Board Color -\nSelect a color set\nto apply.")
             self.theme_info_label.config(
-                text="선택한 색상 조합이 좌측 보드에 즉시 반영됩니다.\nEnter로 적용하고 Esc로 메뉴로 돌아갑니다."
+                text="The selected color combination is immediately reflected on the left board.\nPress Enter to apply or Esc to return to the menu."
             )
             self._update_theme_info_wraplength()
         elif category == "piece_color":
@@ -731,9 +731,9 @@ class ChessGUI:
                 self.theme_listbox.insert(tk.END, theme.name)
             if themes:
                 self.preview_piece_color_theme = themes[selected_index]
-            self.status_label.config(text="Piece Color -\n흑/백 기물 색상을\n선택하세요.")
+            self.status_label.config(text="Piece Color -\nSelect a color set\nto apply.")
             self.theme_info_label.config(
-                text="기물 전용 색상을 설정합니다. 좌측 보드에서 즉시 확인할 수 있습니다.\nEnter로 적용, Esc로 메뉴 복귀."
+                text="The selected color combination is immediately reflected on the left board.\nPress Enter to apply or Esc to return to the menu."
             )
             self._update_theme_info_wraplength()
         else:
@@ -791,14 +791,14 @@ class ChessGUI:
             if self.theme_detail_category == "board" and 0 <= index < len(self.board_themes):
                 self.selected_board_theme_index = index
                 self.preview_board_theme = None
-                message = f"보드 테마 '{self.board_themes[index].name}'을 적용했습니다."
+                message = f"Board theme '{self.board_themes[index].name}' has been applied."
             elif (
                 self.theme_detail_category == "piece_color"
                 and 0 <= index < len(self.piece_color_themes)
             ):
                 self.selected_piece_color_theme_index = index
                 self.preview_piece_color_theme = None
-                message = f"기물 색상 '{self.piece_color_themes[index].name}'을 적용했습니다."
+                message = f"Piece color '{self.piece_color_themes[index].name}' has been applied."
             if message:
                 self.status_label.config(text=message)
             self._show_theme_menu()
