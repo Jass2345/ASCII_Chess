@@ -51,19 +51,17 @@ def check_and_install_package(package_name):
             return False
 
 def install_font():
-    font_name = "menlo-regular.ttf"
-    # 폰트 경로를 ascii_chess/fonts/로 수정
-    font_path = os.path.join("ascii_chess", "fonts", font_name)
-    
-    # 상대 경로로도 시도 (이전 버전과의 호환성을 위해)
-    if not os.path.exists(font_path):
-        font_path = os.path.join("fonts", font_name)
-    
-    if not os.path.exists(font_path):
-        print(f"✗ {font_path} 파일을 찾을 수 없습니다.")
-        return False
-        
     if platform.system() == "Windows":
+        font_name = "menlo-regular.ttf"
+        # 폰트 경로 확인
+        font_path = os.path.join("ascii_chess", "fonts", font_name)
+        if not os.path.exists(font_path):
+            font_path = os.path.join("fonts", font_name)
+        
+        if not os.path.exists(font_path):
+            print(f"✗ {font_path} 파일을 찾을 수 없습니다.")
+            return False
+            
         try:
             import ctypes
             import winreg
@@ -100,28 +98,13 @@ def install_font():
         except Exception as e:
             print(f"✗ 폰트 설치 중 오류 발생: {e}")
             return False
-            
+    
     elif platform.system() == "Darwin":  # macOS
-        try:
-            font_dir = os.path.expanduser("~/Library/Fonts")
-            os.makedirs(font_dir, exist_ok=True)
-            target_path = os.path.join(font_dir, font_name)
-            
-            if os.path.exists(target_path):
-                print(f"✓ {font_name} 폰트가 이미 설치되어 있습니다.")
-                return True
-                
-            shutil.copy2(font_path, target_path)
-            print(f"✓ {font_name} 폰트가 성공적으로 설치되었습니다.")
-            print("※ 일부 프로그램의 경우 재시작 후에 폰트가 적용될 수 있습니다.")
-            return True
-            
-        except Exception as e:
-            print(f"✗ 폰트 설치 중 오류 발생: {e}")
-            return False
+        print("✓ macOS는 기본적으로 Menlo 폰트가 설치되어 있습니다.")
+        return True
+    
     else:
         print(f"✗ {platform.system()} 시스템은 자동 설치를 지원하지 않습니다.")
-        print(f"수동으로 {font_path} 파일을 시스템 폰트 폴더에 복사해주세요.")
         return False
 
 # 필요한 패키지 설치
