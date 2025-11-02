@@ -1210,6 +1210,12 @@ class ChessGUI:
                 if piece and not blink_hidden:
                     piece_tag = "piece_white" if piece.color == chess.WHITE else "piece_black"
                     self.board_text.tag_add(piece_tag, start_index, end_index)
+        # Ensure hint overlays stay on top of theme tags
+        try:
+            self.board_text.tag_raise("hint_square")
+            self.board_text.tag_raise("hint_piece")
+        except tk.TclError:
+            pass
 
     def _effective_board_theme(self) -> BoardTheme:
         if self.preview_board_theme is not None:
