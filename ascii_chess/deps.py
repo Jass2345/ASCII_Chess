@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import importlib
 import os
-import platform
 import shutil
 import sys
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 
@@ -104,18 +104,28 @@ def _is_executable(path: str) -> bool:
 
 
 def _bundled_candidates() -> list[str]:
-    system = platform.system().lower()
-    base_dir = os.path.join(os.path.dirname(__file__), "..", "engines")
-    base_dir = os.path.abspath(base_dir)
+    base_dir = Path(__file__).resolve().parent.parent / "engines"
+    if not base_dir.exists():
+        return []
 
-    mapping = {
-        "darwin": ["stockfish-macos"],
-        "windows": ["stockfish-windows", "stockfish-windows.exe", "stockfish.exe"],
-        "win32": ["stockfish-windows", "stockfish-windows.exe", "stockfish.exe"],
-    }
+    candidates: list[str] = []
+    stockfish_dir = base_dir / "stockfish"
+    if stockfish_dir.exists():
+        candidates.append(str(stockfish_dir))
 
-    names = mapping.get(system, [])
-    return [os.path.join(base_dir, name) for name in names]
+    for entry in sorted(base_dir.iterdir()):
+        if entry.name == "stockfish":
+            continue
+        if "stockfish" in entry.name.lower():
+            candidates.append(str(entry))
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for candidate in candidates:
+        if candidate not in seen:
+            result.append(candidate)
+            seen.add(candidate)
+    return result
 
 
 # ===== 종합 결과 =====

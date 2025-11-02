@@ -52,7 +52,7 @@ pip install python-chess
 ## 준비 사항
 - Python 3.10 이상
 - `pip install python-chess`
-- Stockfish 실행 파일 (PATH 등록 또는 실행 경로 지정)
+- Stockfish 실행 파일 (직접 다운로드 후 `engines/stockfish/`에 배치 — 이름에 `stockfish`가 포함된 다른 폴더/파일도 자동 탐색)
 - Menlo-Regular.ttf 폰트 파일을 `ascii_chess/fonts/menlo-regular.ttf`로 복사
 
 ## 실행 방법
@@ -62,11 +62,13 @@ python main.py [옵션]
 ```
 
 ### 지원 옵션
-- `--engine-path /path/to/stockfish` : Stockfish 실행 파일 경로 지정
+- `--engine-path /path/to/stockfish` : Stockfish 실행 파일 경로 지정 (기본은 `engines/stockfish/` 자동 탐색)
 - `--think-time 1.0` : AI 한 수당 기본 사고 시간(초)
 - `--ascii-only` : 유니코드 대신 ASCII 기물 렌더링
 - `--min-rating`, `--max-rating` : 허용 Elo 범위 재설정
 - `--no-auto-install` : `python-chess` 자동 설치 시도 비활성화
+
+기본적으로 실행 시 `engines/stockfish/` 폴더를 우선 탐색하고, 그 외 `engines/` 하위에서 이름에 `stockfish`가 포함된 항목도 순차적으로 검사하여 사용 가능한 엔진을 찾습니다.
 
 ## 조작 안내
 - 인트로: `↑ / ↓`로 옵션 이동, `Enter`로 선택
