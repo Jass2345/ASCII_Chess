@@ -20,7 +20,7 @@ FONT_DIR = Path(__file__).resolve().parent / "fonts"
 FONT_PATH = FONT_DIR / "menlo-regular.ttf"
 
 # 고정폭 폰트 사용으로 체크판 자간 정렬
-BOARD_FONT = (MENLO_FONT_NAME, 32)
+BOARD_FONT = (MENLO_FONT_NAME, 30)
 MOVE_FONT = (MENLO_FONT_NAME, 12)
 STATUS_FONT = (MENLO_FONT_NAME, 11)
 PROMPT_FONT = (MENLO_FONT_NAME, 11)
