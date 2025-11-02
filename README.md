@@ -3,8 +3,11 @@
 HANNAM Univ. Embedded system Fall - Vibe coding / team. holycow
 
 20222328 윤여명
+
 20222305 지민우
+
 20222319 정재석
+
 
 Stockfish 엔진 기반의 봇을 상대로 플레이하는 Tkinter GUI 체스 프로그램입니다. SAN 표기(SAN move notation)로 수를 입력해 게임을 진행합니다.
 
