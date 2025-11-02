@@ -4,6 +4,34 @@ HNU 2025 ESP course Fall - vibe coding (윤여명, 정재석, 지민우)
 
 터미널 또는 GUI 환경에서 Stockfish 엔진과 대국할 수 있는 ASCII 기반 체스 프로그램입니다. 플레이어는 SAN 형태로 수를 입력하며, Enemy(Stockfish)와 번갈아 대국합니다.
 
+## 설치 방법 (Installation)
+
+### 자동 설치 (권장)
+1. 다음 명령어로 저장소를 클론합니다:
+   ```bash
+   git clone https://github.com/yourusername/ASCII_Chess.git
+   cd ASCII_Chess
+   ```
+
+2. 관리자 권한으로 `main.py`를 실행합니다:
+   - Windows: `python main.py` (관리자 권한으로 실행)
+   - macOS: `python3 main.py`
+
+   > 💡 Windows에서는 자동으로 관리자 권한을 요청하며, macOS는 기본 설정으로 실행 가능합니다.
+
+### 수동 설치
+#### 1. 필수 패키지 설치
+```bash
+pip install python-chess
+```
+
+#### 2. 폰트 설치 (Windows 전용)
+- `ascii_chess/fonts/menlo-regular.ttf` 파일을 더블클릭하여 설치
+- 또는 Windows 폰트 폴더(`C:\Windows\Fonts\`)에 복사
+
+> **Note for macOS 사용자**
+> - 기본적으로 Menlo 폰트가 설치되어 있으므로 추가 설치가 필요 없습니다.
+
 ## 주요 특징
 - 인트로 화면에서 Enemy Elo를 입력 후 게임 시작
 - GUI(기본)와 CLI(`--cli`) 모드 지원
